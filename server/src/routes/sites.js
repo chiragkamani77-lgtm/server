@@ -1,0 +1,207 @@
+import express from 'express';
+import { Site, User } from '../models/index.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
+
+const router = express.Router();
+
+// Get all sites (filtered by user access)
+router.get('/', authenticate, async (req, res) => {
+  try {
+    let sites;
+
+    if (req.user.role === 1) {
+      // Developer sees all sites
+      sites = await Site.find()
+        .populate('createdBy', 'name email')
+        .populate('assignedUsers', 'name email role')
+        .sort({ createdAt: -1 });
+    } else {
+      // Others see only assigned sites
+      sites = await Site.find({ assignedUsers: req.user._id })
+        .populate('createdBy', 'name email')
+        .populate('assignedUsers', 'name email role')
+        .sort({ createdAt: -1 });
+    }
+
+    res.json(sites);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Create site (Level 1 only)
+router.post('/', authenticate, requireRole(1), async (req, res) => {
+  try {
+    const { name, address, description, status } = req.body;
+
+    const site = new Site({
+      name,
+      address,
+      description,
+      status,
+      createdBy: req.user._id
+    });
+
+    await site.save();
+    await site.populate('createdBy', 'name email');
+
+    res.status(201).json(site);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get single site
+router.get('/:id', authenticate, async (req, res) => {
+  try {
+    const site = await Site.findById(req.params.id)
+      .populate('createdBy', 'name email')
+      .populate('assignedUsers', 'name email role');
+
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    // Check access
+    if (req.user.role !== 1 && !site.hasAccess(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    res.json(site);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Update site
+router.put('/:id', authenticate, requireRole(1, 2), async (req, res) => {
+  try {
+    const { name, address, description, status } = req.body;
+
+    const site = await Site.findById(req.params.id);
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    // Level 2 can only update if assigned
+    if (req.user.role === 2 && !site.hasAccess(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    site.name = name || site.name;
+    site.address = address !== undefined ? address : site.address;
+    site.description = description !== undefined ? description : site.description;
+    site.status = status || site.status;
+
+    await site.save();
+    await site.populate('createdBy', 'name email');
+    await site.populate('assignedUsers', 'name email role');
+
+    res.json(site);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Delete site (Level 1 only)
+router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
+  try {
+    const site = await Site.findByIdAndDelete(req.params.id);
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    res.json({ message: 'Site deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Assign user to site
+router.post('/:id/assign', authenticate, requireRole(1, 2), async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const site = await Site.findById(req.params.id);
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    // Level 2 can only assign if they have access to the site
+    if (req.user.role === 2 && !site.hasAccess(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Level 2 can only assign their children
+    if (req.user.role === 2) {
+      const childIds = await req.user.getChildIds();
+      if (!childIds.some(id => id.toString() === userId)) {
+        return res.status(403).json({ message: 'Can only assign your own team members' });
+      }
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (!site.assignedUsers.includes(userId)) {
+      site.assignedUsers.push(userId);
+      await site.save();
+    }
+
+    await site.populate('assignedUsers', 'name email role');
+
+    res.json(site);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Remove user from site
+router.delete('/:id/assign/:userId', authenticate, requireRole(1, 2), async (req, res) => {
+  try {
+    const site = await Site.findById(req.params.id);
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    // Level 2 can only remove if they have access
+    if (req.user.role === 2 && !site.hasAccess(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    site.assignedUsers = site.assignedUsers.filter(
+      u => u.toString() !== req.params.userId
+    );
+    await site.save();
+
+    await site.populate('assignedUsers', 'name email role');
+
+    res.json(site);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get users assigned to site
+router.get('/:id/users', authenticate, async (req, res) => {
+  try {
+    const site = await Site.findById(req.params.id)
+      .populate('assignedUsers', 'name email role');
+
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    if (req.user.role !== 1 && !site.hasAccess(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    res.json(site.assignedUsers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+export default router;
