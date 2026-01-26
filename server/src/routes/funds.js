@@ -1,5 +1,5 @@
 import express from 'express';
-import { FundAllocation, User, Site } from '../models/index.js';
+import { FundAllocation, User, Site, Expense, Bill, WorkerLedger } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -128,6 +128,184 @@ router.get('/my-summary', authenticate, async (req, res) => {
         count: pendingReceivedAgg[0]?.count || 0
       },
       balance: (receivedAgg[0]?.total || 0) - (disbursedAgg[0]?.total || 0)
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get fund utilization for a specific allocation
+router.get('/:id/utilization', authenticate, async (req, res) => {
+  try {
+    const allocation = await FundAllocation.findById(req.params.id)
+      .populate('fromUser', 'name email role')
+      .populate('toUser', 'name email role')
+      .populate('site', 'name');
+
+    if (!allocation) {
+      return res.status(404).json({ message: 'Allocation not found' });
+    }
+
+    // Check organization access
+    if (allocation.organization.toString() !== req.user.organization?.toString()) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Get expenses linked to this fund allocation
+    const expenses = await Expense.find({ fundAllocation: allocation._id })
+      .populate('site', 'name')
+      .populate('category', 'name')
+      .populate('user', 'name');
+
+    const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+
+    // Get bills linked to this fund allocation
+    const bills = await Bill.find({ fundAllocation: allocation._id })
+      .populate('site', 'name')
+      .populate('createdBy', 'name');
+
+    const totalBills = bills.reduce((sum, b) => sum + b.totalAmount, 0);
+
+    // Get worker ledger entries linked to this fund allocation
+    const ledgerEntries = await WorkerLedger.find({ fundAllocation: allocation._id })
+      .populate('worker', 'name')
+      .populate('site', 'name');
+
+    const ledgerCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((sum, e) => sum + e.amount, 0);
+    const ledgerDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((sum, e) => sum + e.amount, 0);
+
+    // Get sub-allocations (funds passed down to others)
+    const subAllocations = await FundAllocation.find({
+      organization: allocation.organization,
+      fromUser: allocation.toUser._id,
+      status: 'disbursed'
+    }).populate('toUser', 'name email role');
+
+    const totalSubAllocated = subAllocations.reduce((sum, a) => sum + a.amount, 0);
+
+    const totalUtilized = totalExpenses + totalBills + (ledgerCredits - ledgerDebits) + totalSubAllocated;
+    const remainingBalance = allocation.amount - totalUtilized;
+
+    res.json({
+      allocation,
+      utilization: {
+        expenses: {
+          items: expenses,
+          total: totalExpenses,
+          count: expenses.length
+        },
+        bills: {
+          items: bills,
+          total: totalBills,
+          count: bills.length
+        },
+        workerLedger: {
+          items: ledgerEntries,
+          credits: ledgerCredits,
+          debits: ledgerDebits,
+          net: ledgerCredits - ledgerDebits,
+          count: ledgerEntries.length
+        },
+        subAllocations: {
+          items: subAllocations,
+          total: totalSubAllocated,
+          count: subAllocations.length
+        }
+      },
+      summary: {
+        allocated: allocation.amount,
+        totalUtilized,
+        remainingBalance,
+        utilizationPercent: allocation.amount > 0 ? ((totalUtilized / allocation.amount) * 100).toFixed(1) : 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get organization-wide fund flow summary
+router.get('/flow/summary', authenticate, async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    // Get all disbursed allocations grouped by level
+    const allocations = await FundAllocation.find({
+      organization: req.user.organization,
+      status: 'disbursed'
+    })
+      .populate('fromUser', 'name email role')
+      .populate('toUser', 'name email role')
+      .populate('site', 'name');
+
+    // Separate by flow type
+    const developerToEngineer = allocations.filter(a => a.fromUser?.role === 1 && a.toUser?.role === 2);
+    const engineerToSupervisor = allocations.filter(a => a.fromUser?.role === 2 && a.toUser?.role === 3);
+    const developerToSupervisor = allocations.filter(a => a.fromUser?.role === 1 && a.toUser?.role === 3);
+
+    // Get total utilized from each category
+    const expenseTotal = await Expense.aggregate([
+      { $match: { organization: req.user.organization } },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
+    ]);
+
+    const billTotal = await Bill.aggregate([
+      { $match: { organization: req.user.organization, status: { $in: ['credited', 'paid'] } } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } }
+    ]);
+
+    const ledgerTotal = await WorkerLedger.aggregate([
+      { $match: { organization: req.user.organization } },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const ledgerCredits = ledgerTotal.find(l => l._id === 'credit')?.total || 0;
+    const ledgerDebits = ledgerTotal.find(l => l._id === 'debit')?.total || 0;
+
+    res.json({
+      fundFlow: {
+        developerToEngineer: {
+          total: developerToEngineer.reduce((sum, a) => sum + a.amount, 0),
+          count: developerToEngineer.length,
+          allocations: developerToEngineer
+        },
+        engineerToSupervisor: {
+          total: engineerToSupervisor.reduce((sum, a) => sum + a.amount, 0),
+          count: engineerToSupervisor.length,
+          allocations: engineerToSupervisor
+        },
+        developerToSupervisor: {
+          total: developerToSupervisor.reduce((sum, a) => sum + a.amount, 0),
+          count: developerToSupervisor.length,
+          allocations: developerToSupervisor
+        }
+      },
+      utilization: {
+        expenses: {
+          total: expenseTotal[0]?.total || 0,
+          count: expenseTotal[0]?.count || 0
+        },
+        bills: {
+          total: billTotal[0]?.total || 0,
+          count: billTotal[0]?.count || 0
+        },
+        workerLedger: {
+          credits: ledgerCredits,
+          debits: ledgerDebits,
+          net: ledgerCredits - ledgerDebits,
+          count: ledgerTotal.reduce((sum, l) => sum + l.count, 0)
+        }
+      },
+      totalDisbursed: allocations.reduce((sum, a) => sum + a.amount, 0),
+      totalUtilized: (expenseTotal[0]?.total || 0) + (billTotal[0]?.total || 0) + (ledgerCredits - ledgerDebits)
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

@@ -33,8 +33,8 @@ export function AuthProvider({ children }) {
     return data.user
   }
 
-  const register = async (email, password, name) => {
-    const { data } = await authApi.register({ email, password, name })
+  const register = async (email, password, name, role) => {
+    const { data } = await authApi.register({ email, password, name, role })
     localStorage.setItem('accessToken', data.accessToken)
     localStorage.setItem('refreshToken', data.refreshToken)
     setUser(data.user)

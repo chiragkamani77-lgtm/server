@@ -75,27 +75,35 @@ export default function Attendance() {
   })
 
   useEffect(() => {
-    fetchInitialData()
-  }, [])
+    if (user?._id) {
+      fetchInitialData()
+    }
+  }, [user?._id])
 
   useEffect(() => {
-    fetchRecords()
-  }, [pagination.page, filters])
+    if (user?._id) {
+      fetchRecords()
+    }
+  }, [pagination.page, filters, user?._id])
 
   const fetchInitialData = async () => {
+    if (!user?._id) return
+
     try {
       const [sitesRes, workersRes] = await Promise.all([
         sitesApi.getAll(),
         usersApi.getChildren(),
       ])
-      setSites(sitesRes.data)
-      setWorkers(workersRes.data)
+      setSites(sitesRes.data || [])
+      setWorkers(workersRes.data || [])
     } catch (error) {
       console.error('Error fetching initial data:', error)
     }
   }
 
   const fetchRecords = async () => {
+    if (!user?._id) return
+
     try {
       setLoading(true)
       const params = {
@@ -104,12 +112,12 @@ export default function Attendance() {
         ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v)),
       }
       const { data } = await attendanceApi.getAll(params)
-      setRecords(data.records)
-      setPagination(data.pagination)
+      setRecords(data?.records || [])
+      setPagination(data?.pagination || { page: 1, pages: 1, total: 0 })
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to fetch attendance records',
+        description: error.response?.data?.message || 'Failed to fetch attendance records',
         variant: 'destructive',
       })
     } finally {

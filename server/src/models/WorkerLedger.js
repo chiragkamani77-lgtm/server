@@ -20,6 +20,10 @@ const workerLedgerSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  fundAllocation: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'FundAllocation'
+  },
   type: {
     type: String,
     enum: ['credit', 'debit'],
@@ -61,6 +65,7 @@ const workerLedgerSchema = new mongoose.Schema({
 workerLedgerSchema.index({ organization: 1, worker: 1 });
 workerLedgerSchema.index({ worker: 1, transactionDate: -1 });
 workerLedgerSchema.index({ site: 1, type: 1 });
+workerLedgerSchema.index({ fundAllocation: 1 });
 
 const WorkerLedger = mongoose.model('WorkerLedger', workerLedgerSchema);
 export default WorkerLedger;

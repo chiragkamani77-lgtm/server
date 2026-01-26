@@ -6,6 +6,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Building2 } from 'lucide-react'
 
@@ -16,7 +23,7 @@ export default function Login() {
   const { toast } = useToast()
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
-  const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '' })
+  const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '', role: '1' })
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />
@@ -44,7 +51,7 @@ export default function Login() {
     e.preventDefault()
     setIsLoading(true)
     try {
-      await register(registerForm.email, registerForm.password, registerForm.name)
+      await register(registerForm.email, registerForm.password, registerForm.name, parseInt(registerForm.role))
       toast({ title: 'Account created successfully!' })
       navigate('/')
     } catch (error) {
@@ -140,6 +147,22 @@ export default function Login() {
                     required
                     minLength={6}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="register-role">Role</Label>
+                  <Select
+                    value={registerForm.role}
+                    onValueChange={(value) => setRegisterForm({ ...registerForm, role: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Partner / Owner</SelectItem>
+                      <SelectItem value="2">Supervisor</SelectItem>
+                      <SelectItem value="3">Worker</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? 'Creating account...' : 'Create account'}

@@ -161,7 +161,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
-    const { workerId, siteId, type, amount, category, description, transactionDate, referenceNumber, paymentMode } = req.body;
+    const { workerId, siteId, type, amount, category, description, transactionDate, referenceNumber, paymentMode, fundAllocationId } = req.body;
 
     // Verify worker
     const worker = await User.findById(workerId);
@@ -190,6 +190,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       worker: workerId,
       site: siteId || null,
       createdBy: req.user._id,
+      fundAllocation: fundAllocationId || null,
       type,
       amount,
       category,
@@ -203,6 +204,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
     await entry.populate('worker', 'name email role');
     if (siteId) await entry.populate('site', 'name');
     await entry.populate('createdBy', 'name');
+    if (fundAllocationId) await entry.populate('fundAllocation');
 
     res.status(201).json(entry);
   } catch (error) {

@@ -1,5 +1,5 @@
 import express from 'express';
-import { Investment, User, Expense, Site } from '../models/index.js';
+import { Investment, User, Expense, Site, Bill, WorkerLedger, FundAllocation } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -90,22 +90,147 @@ router.get('/summary', authenticate, async (req, res) => {
     // Total organization investment
     const totalInvestment = partnerInvestments.reduce((sum, p) => sum + p.totalInvested, 0);
 
-    // Total expenses from organization sites
-    const sites = await Site.find({ organization: req.user.organization }).select('_id');
-    const siteIds = sites.map(s => s._id);
-
-    const expenseAgg = await Expense.aggregate([
-      { $match: { site: { $in: siteIds } } },
-      { $group: { _id: null, totalExpenses: { $sum: '$amount' } } }
+    // Total expenses from organization (try by organization first, then by sites for backward compatibility)
+    let expenseAgg = await Expense.aggregate([
+      { $match: { organization: req.user.organization } },
+      { $group: { _id: null, totalExpenses: { $sum: '$amount' }, count: { $sum: 1 } } }
     ]);
 
+    // Fallback: if no expenses found with organization, try filtering by site
+    if (!expenseAgg[0]) {
+      const sites = await Site.find({ organization: req.user.organization }).select('_id');
+      const siteIds = sites.map(s => s._id);
+      expenseAgg = await Expense.aggregate([
+        { $match: { site: { $in: siteIds } } },
+        { $group: { _id: null, totalExpenses: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]);
+    }
+
     const totalExpenses = expenseAgg[0]?.totalExpenses || 0;
+    const expenseCount = expenseAgg[0]?.count || 0;
+
+    // Total Bills (GST Bills) - paid bills
+    const billsAgg = await Bill.aggregate([
+      { $match: { organization: req.user.organization, status: { $in: ['credited', 'paid'] } } },
+      {
+        $group: {
+          _id: null,
+          totalBills: { $sum: '$totalAmount' },
+          totalBaseAmount: { $sum: '$baseAmount' },
+          totalGstAmount: { $sum: '$gstAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Bills by type breakdown
+    const billsByType = await Bill.aggregate([
+      { $match: { organization: req.user.organization, status: { $in: ['credited', 'paid'] } } },
+      {
+        $group: {
+          _id: '$billType',
+          total: { $sum: '$totalAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Total Worker Ledger (Credits = money owed to workers)
+    const workerLedgerAgg = await WorkerLedger.aggregate([
+      { $match: { organization: req.user.organization } },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Worker ledger by category
+    const workerLedgerByCategory = await WorkerLedger.aggregate([
+      { $match: { organization: req.user.organization } },
+      {
+        $group: {
+          _id: '$category',
+          credits: {
+            $sum: { $cond: [{ $eq: ['$type', 'credit'] }, '$amount', 0] }
+          },
+          debits: {
+            $sum: { $cond: [{ $eq: ['$type', 'debit'] }, '$amount', 0] }
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const workerCredits = workerLedgerAgg.find(w => w._id === 'credit')?.total || 0;
+    const workerDebits = workerLedgerAgg.find(w => w._id === 'debit')?.total || 0;
+    const netWorkerPayable = workerCredits - workerDebits; // Net amount owed to workers
+
+    // Fund Allocations summary (disbursed funds)
+    const fundAllocationsAgg = await FundAllocation.aggregate([
+      { $match: { organization: req.user.organization, status: 'disbursed' } },
+      {
+        $group: {
+          _id: '$purpose',
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const totalFundsDisbursed = fundAllocationsAgg.reduce((sum, f) => sum + f.total, 0);
+
+    // Calculate total utilized funds
+    const totalBills = billsAgg[0]?.totalBills || 0;
+    const totalUtilized = totalExpenses + totalBills + netWorkerPayable;
 
     res.json({
       partnerInvestments,
       totalInvestment,
-      totalExpenses,
-      remainingFunds: totalInvestment - totalExpenses
+
+      // Detailed breakdown
+      expenses: {
+        total: totalExpenses,
+        count: expenseCount,
+        label: 'Site Expenses'
+      },
+      bills: {
+        total: totalBills,
+        baseAmount: billsAgg[0]?.totalBaseAmount || 0,
+        gstAmount: billsAgg[0]?.totalGstAmount || 0,
+        count: billsAgg[0]?.count || 0,
+        byType: billsByType,
+        label: 'Material & GST Bills'
+      },
+      workerLedger: {
+        credits: workerCredits,
+        debits: workerDebits,
+        netPayable: netWorkerPayable,
+        byCategory: workerLedgerByCategory,
+        label: 'Labor & Salaries'
+      },
+      fundAllocations: {
+        totalDisbursed: totalFundsDisbursed,
+        byPurpose: fundAllocationsAgg,
+        label: 'Funds Allocated'
+      },
+
+      // Legacy fields for backward compatibility
+      totalExpenses: totalUtilized,
+
+      // New comprehensive summary
+      summary: {
+        totalInvestment,
+        totalUtilized,
+        siteExpenses: totalExpenses,
+        materialBills: totalBills,
+        laborCosts: netWorkerPayable,
+        remainingFunds: totalInvestment - totalUtilized
+      },
+
+      remainingFunds: totalInvestment - totalUtilized
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

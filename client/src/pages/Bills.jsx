@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { billsApi, sitesApi } from '@/lib/api'
+import { billsApi, sitesApi, fundsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -56,6 +56,7 @@ export default function Bills() {
 
   const [bills, setBills] = useState([])
   const [sites, setSites] = useState([])
+  const [fundAllocations, setFundAllocations] = useState([])
   const [summary, setSummary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
@@ -70,6 +71,7 @@ export default function Bills() {
 
   const [form, setForm] = useState({
     siteId: '',
+    fundAllocationId: '',
     vendorName: '',
     vendorGstNumber: '',
     invoiceNumber: '',

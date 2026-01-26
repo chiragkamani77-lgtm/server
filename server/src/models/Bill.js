@@ -15,6 +15,10 @@ const billSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  fundAllocation: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'FundAllocation'
+  },
   vendorName: {
     type: String,
     required: true,
@@ -80,6 +84,7 @@ const billSchema = new mongoose.Schema({
 billSchema.index({ organization: 1, status: 1 });
 billSchema.index({ organization: 1, billDate: -1 });
 billSchema.index({ site: 1, status: 1 });
+billSchema.index({ fundAllocation: 1 });
 
 const Bill = mongoose.model('Bill', billSchema);
 export default Bill;

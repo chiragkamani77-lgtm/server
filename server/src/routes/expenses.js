@@ -155,7 +155,11 @@ router.get('/summary/:siteId', authenticate, async (req, res) => {
 // Create expense
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { siteId, categoryId, amount, description, vendorName, expenseDate } = req.body;
+    const { siteId, categoryId, amount, description, vendorName, expenseDate, fundAllocationId } = req.body;
+
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
 
     // Check site access
     const site = await Site.findById(siteId);
@@ -168,9 +172,11 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     const expense = new Expense({
+      organization: req.user.organization,
       site: siteId,
       category: categoryId,
       user: req.user._id,
+      fundAllocation: fundAllocationId || null,
       amount,
       description,
       vendorName,
@@ -181,6 +187,7 @@ router.post('/', authenticate, async (req, res) => {
     await expense.populate('site', 'name');
     await expense.populate('category', 'name');
     await expense.populate('user', 'name email');
+    if (fundAllocationId) await expense.populate('fundAllocation');
 
     res.status(201).json(expense);
   } catch (error) {

@@ -129,7 +129,8 @@ router.post('/', authenticate, async (req, res) => {
       baseAmount,
       gstAmount,
       description,
-      billType
+      billType,
+      fundAllocationId
     } = req.body;
 
     // Verify site access
@@ -149,6 +150,7 @@ router.post('/', authenticate, async (req, res) => {
       organization: req.user.organization,
       site: siteId || null,
       createdBy: req.user._id,
+      fundAllocation: fundAllocationId || null,
       vendorName,
       vendorGstNumber,
       invoiceNumber,
@@ -163,6 +165,7 @@ router.post('/', authenticate, async (req, res) => {
     await bill.save();
     await bill.populate('site', 'name');
     await bill.populate('createdBy', 'name email');
+    if (fundAllocationId) await bill.populate('fundAllocation');
 
     res.status(201).json(bill);
   } catch (error) {

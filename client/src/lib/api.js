@@ -146,7 +146,9 @@ export const fundsApi = {
   create: (data) => api.post('/funds', data),
   updateStatus: (id, status) => api.put(`/funds/${id}/status`, { status }),
   delete: (id) => api.delete(`/funds/${id}`),
-  getMySummary: () => api.get('/funds/my-summary')
+  getMySummary: () => api.get('/funds/my-summary'),
+  getUtilization: (id) => api.get(`/funds/${id}/utilization`),
+  getFlowSummary: () => api.get('/funds/flow/summary')
 }
 
 // Bills API

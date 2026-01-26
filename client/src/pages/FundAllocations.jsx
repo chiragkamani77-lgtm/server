@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, ArrowRight, Wallet, TrendingUp, Clock, ChevronLeft, ChevronRight, Check, X } from 'lucide-react'
+import { Plus, ArrowRight, ArrowDown, Wallet, TrendingUp, Clock, ChevronLeft, ChevronRight, Check, X, Eye, Receipt, Users, Building2 } from 'lucide-react'
 
 const PURPOSES = [
   { value: 'site_expense', label: 'Site Expense' },
@@ -57,9 +57,12 @@ export default function FundAllocations() {
   const [users, setUsers] = useState([])
   const [sites, setSites] = useState([])
   const [summary, setSummary] = useState(null)
+  const [flowSummary, setFlowSummary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [selectedAllocation, setSelectedAllocation] = useState(null)
+  const [utilizationData, setUtilizationData] = useState(null)
 
   const [form, setForm] = useState({
     toUserId: '',
@@ -71,31 +74,52 @@ export default function FundAllocations() {
   })
 
   useEffect(() => {
-    fetchData()
-  }, [pagination.page])
+    if (user?._id) {
+      fetchData()
+    }
+  }, [pagination.page, user?._id])
 
   const fetchData = async () => {
+    if (!user?._id) return
+
     try {
       setLoading(true)
-      const [allocationsRes, summaryRes, usersRes, sitesRes] = await Promise.all([
+      const [allocationsRes, summaryRes, usersRes, sitesRes, flowRes] = await Promise.all([
         fundsApi.getAll({ page: pagination.page, limit: 20 }),
         fundsApi.getMySummary(),
         usersApi.getAll(),
         sitesApi.getAll(),
+        isAdmin ? fundsApi.getFlowSummary() : Promise.resolve({ data: null }),
       ])
-      setAllocations(allocationsRes.data.allocations)
-      setPagination(allocationsRes.data.pagination)
+      setAllocations(allocationsRes.data?.allocations || [])
+      setPagination(allocationsRes.data?.pagination || { page: 1, pages: 1, total: 0 })
       setSummary(summaryRes.data)
-      setUsers(usersRes.data.filter(u => u._id !== user._id))
-      setSites(sitesRes.data)
+      setUsers((usersRes.data || []).filter(u => u._id !== user?._id))
+      setSites(sitesRes.data || [])
+      if (flowRes.data) setFlowSummary(flowRes.data)
     } catch (error) {
+      console.error('Fund allocations error:', error)
       toast({
         title: 'Error',
-        description: 'Failed to fetch fund allocations',
+        description: error.response?.data?.message || 'Failed to fetch fund allocations',
         variant: 'destructive',
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchUtilization = async (allocationId) => {
+    try {
+      const res = await fundsApi.getUtilization(allocationId)
+      setUtilizationData(res.data)
+      setSelectedAllocation(allocationId)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch utilization data',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -211,6 +235,157 @@ export default function FundAllocations() {
         </div>
       )}
 
+      {/* Fund Flow Summary (Admin Only) */}
+      {isAdmin && flowSummary && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ArrowDown className="h-5 w-5" />
+              Fund Flow Overview
+            </CardTitle>
+            <CardDescription>How funds flow through the organization</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3 mb-6">
+              {/* Developer to Engineer */}
+              <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
+                <div className="flex items-center gap-2 mb-2">
+                  <Building2 className="h-5 w-5 text-blue-500" />
+                  <span className="font-medium text-sm">Developer → Engineer</span>
+                </div>
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(flowSummary.fundFlow?.developerToEngineer?.total || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {flowSummary.fundFlow?.developerToEngineer?.count || 0} allocations
+                </p>
+              </div>
+
+              {/* Engineer to Supervisor */}
+              <div className="p-4 border rounded-lg bg-purple-50 dark:bg-purple-950">
+                <div className="flex items-center gap-2 mb-2">
+                  <Users className="h-5 w-5 text-purple-500" />
+                  <span className="font-medium text-sm">Engineer → Supervisor</span>
+                </div>
+                <div className="text-2xl font-bold text-purple-600">
+                  {formatCurrency(flowSummary.fundFlow?.engineerToSupervisor?.total || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {flowSummary.fundFlow?.engineerToSupervisor?.count || 0} allocations
+                </p>
+              </div>
+
+              {/* Developer to Supervisor */}
+              <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-950">
+                <div className="flex items-center gap-2 mb-2">
+                  <ArrowRight className="h-5 w-5 text-green-500" />
+                  <span className="font-medium text-sm">Developer → Supervisor</span>
+                </div>
+                <div className="text-2xl font-bold text-green-600">
+                  {formatCurrency(flowSummary.fundFlow?.developerToSupervisor?.total || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {flowSummary.fundFlow?.developerToSupervisor?.count || 0} allocations
+                </p>
+              </div>
+            </div>
+
+            {/* Utilization Breakdown */}
+            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+              <h4 className="font-medium mb-3">Fund Utilization Summary</h4>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="flex justify-between items-center p-2 border rounded">
+                  <span className="text-sm flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-orange-500" />
+                    Expenses
+                  </span>
+                  <span className="font-medium">{formatCurrency(flowSummary.utilization?.expenses?.total || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 border rounded">
+                  <span className="text-sm flex items-center gap-2">
+                    <Receipt className="h-4 w-4 text-blue-500" />
+                    Bills
+                  </span>
+                  <span className="font-medium">{formatCurrency(flowSummary.utilization?.bills?.total || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 border rounded">
+                  <span className="text-sm flex items-center gap-2">
+                    <Users className="h-4 w-4 text-purple-500" />
+                    Worker Ledger
+                  </span>
+                  <span className="font-medium">{formatCurrency(flowSummary.utilization?.workerLedger?.net || 0)}</span>
+                </div>
+              </div>
+              <div className="mt-4 pt-4 border-t flex justify-between items-center">
+                <span className="font-medium">Total Disbursed vs Utilized</span>
+                <div className="text-right">
+                  <span className="text-green-600 font-bold">{formatCurrency(flowSummary.totalDisbursed || 0)}</span>
+                  <span className="mx-2 text-muted-foreground">/</span>
+                  <span className="text-blue-600 font-bold">{formatCurrency(flowSummary.totalUtilized || 0)}</span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Utilization Detail Dialog */}
+      {selectedAllocation && utilizationData && (
+        <Dialog open={!!selectedAllocation} onOpenChange={() => { setSelectedAllocation(null); setUtilizationData(null); }}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Fund Utilization Details</DialogTitle>
+              <DialogDescription>
+                How this allocation of {formatCurrency(utilizationData.allocation?.amount)} has been utilized
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {/* Summary */}
+              <div className="grid gap-2 md:grid-cols-4 text-center">
+                <div className="p-2 border rounded">
+                  <p className="text-xs text-muted-foreground">Allocated</p>
+                  <p className="font-bold text-green-600">{formatCurrency(utilizationData.summary?.allocated || 0)}</p>
+                </div>
+                <div className="p-2 border rounded">
+                  <p className="text-xs text-muted-foreground">Utilized</p>
+                  <p className="font-bold text-blue-600">{formatCurrency(utilizationData.summary?.totalUtilized || 0)}</p>
+                </div>
+                <div className="p-2 border rounded">
+                  <p className="text-xs text-muted-foreground">Remaining</p>
+                  <p className={`font-bold ${utilizationData.summary?.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(utilizationData.summary?.remainingBalance || 0)}
+                  </p>
+                </div>
+                <div className="p-2 border rounded">
+                  <p className="text-xs text-muted-foreground">Utilization</p>
+                  <p className="font-bold">{utilizationData.summary?.utilizationPercent}%</p>
+                </div>
+              </div>
+
+              {/* Breakdown */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-2 bg-orange-50 rounded">
+                  <span>Expenses ({utilizationData.utilization?.expenses?.count || 0})</span>
+                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.expenses?.total || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 bg-blue-50 rounded">
+                  <span>Bills ({utilizationData.utilization?.bills?.count || 0})</span>
+                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.bills?.total || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 bg-purple-50 rounded">
+                  <span>Worker Ledger ({utilizationData.utilization?.workerLedger?.count || 0})</span>
+                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.workerLedger?.net || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 bg-green-50 rounded">
+                  <span>Sub-Allocations ({utilizationData.utilization?.subAllocations?.count || 0})</span>
+                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.subAllocations?.total || 0)}</span>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {/* Allocations Table */}
       <Card>
         <CardHeader>
@@ -267,6 +442,16 @@ export default function FundAllocations() {
                   <TableCell className="text-right font-bold">{formatCurrency(allocation.amount)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
+                      {allocation.status === 'disbursed' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => fetchUtilization(allocation._id)}
+                          title="View Utilization"
+                        >
+                          <Eye className="h-4 w-4 text-blue-500" />
+                        </Button>
+                      )}
                       {isAdmin && allocation.status === 'pending' && (
                         <>
                           <Button

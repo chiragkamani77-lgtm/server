@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, Wallet, PiggyBank, ChevronLeft, ChevronRight, Trash2, Edit } from 'lucide-react'
+import { Plus, TrendingUp, Wallet, PiggyBank, ChevronLeft, ChevronRight, Trash2, Edit, Receipt, Users, Building2, ArrowRight } from 'lucide-react'
 
 const PAYMENT_MODES = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -200,45 +200,180 @@ export default function Investments() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid gap-4 md:grid-cols-4">
+        <>
+          {/* Main Summary Row */}
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Invested</CardTitle>
+                <PiggyBank className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalInvestment)}</div>
+                <p className="text-xs text-muted-foreground">{summary.partnerInvestments?.length || 0} partners</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Utilized</CardTitle>
+                <Wallet className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">{formatCurrency(summary.totalExpenses)}</div>
+                <p className="text-xs text-muted-foreground">Across all categories</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Remaining Funds</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatCurrency(summary.remainingFunds)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {summary.totalInvestment > 0
+                    ? `${((summary.remainingFunds / summary.totalInvestment) * 100).toFixed(1)}% remaining`
+                    : 'No investments yet'}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Utilization Rate</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {summary.totalInvestment > 0
+                    ? `${((summary.totalExpenses / summary.totalInvestment) * 100).toFixed(1)}%`
+                    : '0%'}
+                </div>
+                <p className="text-xs text-muted-foreground">Of total investment</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Fund Utilization Breakdown */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Invested</CardTitle>
-              <PiggyBank className="h-4 w-4 text-muted-foreground" />
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ArrowRight className="h-5 w-5" />
+                Fund Utilization Breakdown
+              </CardTitle>
+              <CardDescription>How invested funds are being utilized</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(summary.totalInvestment)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(summary.totalExpenses)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Remaining Funds</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(summary.remainingFunds)}
+              <div className="grid gap-4 md:grid-cols-3">
+                {/* Site Expenses */}
+                <div className="p-4 border rounded-lg bg-orange-50 dark:bg-orange-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Building2 className="h-5 w-5 text-orange-500" />
+                    <span className="font-medium">Site Expenses</span>
+                  </div>
+                  <div className="text-2xl font-bold text-orange-600">
+                    {formatCurrency(summary.expenses?.total || 0)}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Operational & misc expenses
+                  </p>
+                </div>
+
+                {/* Material & GST Bills */}
+                <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Receipt className="h-5 w-5 text-blue-500" />
+                    <span className="font-medium">Material & GST Bills</span>
+                  </div>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {formatCurrency(summary.bills?.total || 0)}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1 space-y-1">
+                    <p>Base: {formatCurrency(summary.bills?.baseAmount || 0)}</p>
+                    <p>GST: {formatCurrency(summary.bills?.gstAmount || 0)}</p>
+                    <p>{summary.bills?.count || 0} bills</p>
+                  </div>
+                </div>
+
+                {/* Labor & Salaries */}
+                <div className="p-4 border rounded-lg bg-purple-50 dark:bg-purple-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users className="h-5 w-5 text-purple-500" />
+                    <span className="font-medium">Labor & Salaries</span>
+                  </div>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {formatCurrency(summary.workerLedger?.netPayable || 0)}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1 space-y-1">
+                    <p>Credits: {formatCurrency(summary.workerLedger?.credits || 0)}</p>
+                    <p>Debits: {formatCurrency(summary.workerLedger?.debits || 0)}</p>
+                  </div>
+                </div>
               </div>
+
+              {/* Fund Flow Visualization */}
+              <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                <h4 className="font-medium mb-3">Fund Flow Summary</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">Total Investment</span>
+                    <span className="font-medium text-green-600">+ {formatCurrency(summary.totalInvestment)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm text-muted-foreground">
+                    <span className="ml-4">- Site Expenses</span>
+                    <span>- {formatCurrency(summary.expenses?.total || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm text-muted-foreground">
+                    <span className="ml-4">- Material & Bills</span>
+                    <span>- {formatCurrency(summary.bills?.total || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm text-muted-foreground">
+                    <span className="ml-4">- Labor & Salaries</span>
+                    <span>- {formatCurrency(summary.workerLedger?.netPayable || 0)}</span>
+                  </div>
+                  <div className="border-t pt-2 flex justify-between items-center font-medium">
+                    <span>Remaining Balance</span>
+                    <span className={summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}>
+                      = {formatCurrency(summary.remainingFunds)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bills by Type */}
+              {summary.bills?.byType?.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-medium mb-2">Bills by Category</h4>
+                  <div className="grid gap-2 md:grid-cols-3">
+                    {summary.bills.byType.map((item) => (
+                      <div key={item._id} className="flex justify-between p-2 border rounded text-sm">
+                        <span className="capitalize">{item._id}</span>
+                        <span className="font-medium">{formatCurrency(item.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Worker Ledger by Category */}
+              {summary.workerLedger?.byCategory?.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-medium mb-2">Labor Costs by Category</h4>
+                  <div className="grid gap-2 md:grid-cols-3">
+                    {summary.workerLedger.byCategory.map((item) => (
+                      <div key={item._id} className="flex justify-between p-2 border rounded text-sm">
+                        <span className="capitalize">{item._id}</span>
+                        <span className="font-medium">
+                          {formatCurrency(item.credits - item.debits)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Partners</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{summary.partnerInvestments?.length || 0}</div>
-            </CardContent>
-          </Card>
-        </div>
+        </>
       )}
 
       {/* Partner Breakdown */}
