@@ -1,0 +1,46 @@
+import mongoose from 'mongoose';
+
+const investmentSchema = new mongoose.Schema({
+  organization: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true
+  },
+  partner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  investmentDate: {
+    type: Date,
+    required: true,
+    default: Date.now
+  },
+  referenceNumber: {
+    type: String,
+    trim: true
+  },
+  paymentMode: {
+    type: String,
+    enum: ['cash', 'bank_transfer', 'cheque', 'upi', 'other'],
+    default: 'bank_transfer'
+  }
+}, {
+  timestamps: true
+});
+
+// Index for faster queries
+investmentSchema.index({ organization: 1, partner: 1 });
+investmentSchema.index({ organization: 1, investmentDate: -1 });
+
+const Investment = mongoose.model('Investment', investmentSchema);
+export default Investment;

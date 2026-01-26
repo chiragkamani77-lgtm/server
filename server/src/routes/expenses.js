@@ -215,6 +215,24 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
+// Helper to check if user can manage expense (owner, developer, or parent of expense creator)
+const canManageExpense = async (user, expense) => {
+  // Owner can always manage their own expense
+  if (expense.user.toString() === user._id.toString()) {
+    return true;
+  }
+  // Level 1 (Developer) can manage all expenses
+  if (user.role === 1) {
+    return true;
+  }
+  // Level 2 (Supervisor/Engineer) can manage their subordinates' expenses
+  if (user.role === 2) {
+    const childIds = await user.getChildIds();
+    return childIds.some(id => id.toString() === expense.user.toString());
+  }
+  return false;
+};
+
 // Update expense
 router.put('/:id', authenticate, async (req, res) => {
   try {
@@ -224,9 +242,10 @@ router.put('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Expense not found' });
     }
 
-    // Only owner or Level 1 can edit
-    if (req.user.role !== 1 && expense.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Can only edit your own expenses' });
+    // Check if user can manage this expense
+    const canManage = await canManageExpense(req.user, expense);
+    if (!canManage) {
+      return res.status(403).json({ message: 'Can only edit your own or subordinates\' expenses' });
     }
 
     const { categoryId, amount, description, vendorName, expenseDate } = req.body;
@@ -257,9 +276,10 @@ router.delete('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Expense not found' });
     }
 
-    // Only owner or Level 1 can delete
-    if (req.user.role !== 1 && expense.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Can only delete your own expenses' });
+    // Check if user can manage this expense
+    const canManage = await canManageExpense(req.user, expense);
+    if (!canManage) {
+      return res.status(403).json({ message: 'Can only delete your own or subordinates\' expenses' });
     }
 
     await expense.deleteOne();
@@ -279,9 +299,10 @@ router.post('/:id/receipt', authenticate, upload.single('receipt'), async (req, 
       return res.status(404).json({ message: 'Expense not found' });
     }
 
-    // Only owner or Level 1 can upload
-    if (req.user.role !== 1 && expense.user.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Can only upload to your own expenses' });
+    // Check if user can manage this expense
+    const canManage = await canManageExpense(req.user, expense);
+    if (!canManage) {
+      return res.status(403).json({ message: 'Can only upload to your own or subordinates\' expenses' });
     }
 
     if (!req.file) {

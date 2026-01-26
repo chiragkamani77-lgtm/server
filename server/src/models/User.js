@@ -30,6 +30,16 @@ const userSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  organization: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    default: null
+  },
+  dailyRate: {
+    type: Number,
+    min: 0,
+    default: 0
+  },
   isActive: {
     type: Boolean,
     default: true

@@ -19,10 +19,20 @@ const siteSchema = new mongoose.Schema({
     enum: ['active', 'completed', 'on_hold'],
     default: 'active'
   },
+  organization: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
+  },
+  budget: {
+    type: Number,
+    min: 0,
+    default: 0
   },
   assignedUsers: [{
     type: mongoose.Schema.Types.ObjectId,

@@ -4,22 +4,31 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all sites (filtered by user access)
+// Get all sites (filtered by user access and organization)
 router.get('/', authenticate, async (req, res) => {
   try {
     let sites;
+    const filter = {};
+
+    // Filter by organization if user has one
+    if (req.user.organization) {
+      filter.organization = req.user.organization;
+    }
 
     if (req.user.role === 1) {
-      // Developer sees all sites
-      sites = await Site.find()
+      // Developer sees all sites in their organization
+      sites = await Site.find(filter)
         .populate('createdBy', 'name email')
         .populate('assignedUsers', 'name email role')
+        .populate('organization', 'name')
         .sort({ createdAt: -1 });
     } else {
       // Others see only assigned sites
-      sites = await Site.find({ assignedUsers: req.user._id })
+      filter.assignedUsers = req.user._id;
+      sites = await Site.find(filter)
         .populate('createdBy', 'name email')
         .populate('assignedUsers', 'name email role')
+        .populate('organization', 'name')
         .sort({ createdAt: -1 });
     }
 
@@ -32,18 +41,25 @@ router.get('/', authenticate, async (req, res) => {
 // Create site (Level 1 only)
 router.post('/', authenticate, requireRole(1), async (req, res) => {
   try {
-    const { name, address, description, status } = req.body;
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'Please create or join an organization first' });
+    }
+
+    const { name, address, description, status, budget } = req.body;
 
     const site = new Site({
       name,
       address,
       description,
       status,
+      budget: budget || 0,
+      organization: req.user.organization,
       createdBy: req.user._id
     });
 
     await site.save();
     await site.populate('createdBy', 'name email');
+    await site.populate('organization', 'name');
 
     res.status(201).json(site);
   } catch (error) {
@@ -76,7 +92,7 @@ router.get('/:id', authenticate, async (req, res) => {
 // Update site
 router.put('/:id', authenticate, requireRole(1, 2), async (req, res) => {
   try {
-    const { name, address, description, status } = req.body;
+    const { name, address, description, status, budget } = req.body;
 
     const site = await Site.findById(req.params.id);
     if (!site) {
@@ -92,10 +108,14 @@ router.put('/:id', authenticate, requireRole(1, 2), async (req, res) => {
     site.address = address !== undefined ? address : site.address;
     site.description = description !== undefined ? description : site.description;
     site.status = status || site.status;
+    if (budget !== undefined && req.user.role === 1) {
+      site.budget = budget;
+    }
 
     await site.save();
     await site.populate('createdBy', 'name email');
     await site.populate('assignedUsers', 'name email role');
+    await site.populate('organization', 'name');
 
     res.json(site);
   } catch (error) {

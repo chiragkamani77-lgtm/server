@@ -12,6 +12,11 @@ import Expenses from '@/pages/Expenses'
 import Users from '@/pages/Users'
 import Reports from '@/pages/Reports'
 import Categories from './pages/Categories'
+import Investments from '@/pages/Investments'
+import FundAllocations from '@/pages/FundAllocations'
+import Bills from '@/pages/Bills'
+import Attendance from '@/pages/Attendance'
+import WorkerLedger from '@/pages/WorkerLedger'
 
 // Protected route wrapper for role-based access
 function ProtectedRoute({ children, allowedRoles }) {
@@ -60,13 +65,53 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-          <Route path="/categories" 
+          <Route path="/categories"
           element={
             <ProtectedRoute allowedRoles={[1, 2]}>
               <Categories />
             </ProtectedRoute>
           }
           />
+        <Route
+          path="/investments"
+          element={
+            <ProtectedRoute allowedRoles={[1]}>
+              <Investments />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/funds"
+          element={
+            <ProtectedRoute allowedRoles={[1, 2]}>
+              <FundAllocations />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/bills"
+          element={
+            <ProtectedRoute allowedRoles={[1, 2]}>
+              <Bills />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance"
+          element={
+            <ProtectedRoute allowedRoles={[1, 2]}>
+              <Attendance />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ledger"
+          element={
+            <ProtectedRoute allowedRoles={[1, 2, 3]}>
+              <WorkerLedger />
+            </ProtectedRoute>
+          }
+        />
       </Route>
 
       {/* Catch all */}

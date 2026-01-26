@@ -12,6 +12,12 @@ import expensesRoutes from './routes/expenses.js';
 import usersRoutes from './routes/users.js';
 import reportsRoutes from './routes/reports.js';
 import categoriesRoutes from './routes/categories.js';
+import organizationsRoutes from './routes/organizations.js';
+import investmentsRoutes from './routes/investments.js';
+import fundsRoutes from './routes/funds.js';
+import billsRoutes from './routes/bills.js';
+import attendanceRoutes from './routes/attendance.js';
+import ledgerRoutes from './routes/ledger.js';
 
 dotenv.config();
 
@@ -39,6 +45,12 @@ app.use('/api/expenses', expensesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/categories', categoriesRoutes);
+app.use('/api/organizations', organizationsRoutes);
+app.use('/api/investments', investmentsRoutes);
+app.use('/api/funds', fundsRoutes);
+app.use('/api/bills', billsRoutes);
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/ledger', ledgerRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

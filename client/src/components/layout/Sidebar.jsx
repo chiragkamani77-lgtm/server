@@ -8,6 +8,11 @@ import {
   Users,
   FileText,
   Settings,
+  TrendingUp,
+  Banknote,
+  FileSpreadsheet,
+  Calendar,
+  Wallet,
 } from 'lucide-react'
 
 const navItems = [
@@ -30,6 +35,36 @@ const navItems = [
     roles: [1, 2, 3],
   },
   {
+    title: 'Investments',
+    href: '/investments',
+    icon: TrendingUp,
+    roles: [1],
+  },
+  {
+    title: 'Fund Allocations',
+    href: '/funds',
+    icon: Banknote,
+    roles: [1, 2],
+  },
+  {
+    title: 'GST Bills',
+    href: '/bills',
+    icon: FileSpreadsheet,
+    roles: [1, 2],
+  },
+  {
+    title: 'Attendance',
+    href: '/attendance',
+    icon: Calendar,
+    roles: [1, 2],
+  },
+  {
+    title: 'Worker Ledger',
+    href: '/ledger',
+    icon: Wallet,
+    roles: [1, 2, 3],
+  },
+  {
     title: 'Users',
     href: '/users',
     icon: Users,
@@ -42,8 +77,8 @@ const navItems = [
     roles: [1, 2],
   },
   {
-    title: "Categories",
-    href: "/categories",
+    title: 'Categories',
+    href: '/categories',
     icon: Settings,
     roles: [1, 2],
   }

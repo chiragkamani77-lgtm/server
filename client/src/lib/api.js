@@ -116,4 +116,73 @@ export const reportsApi = {
   getSummary: () => api.get('/reports/summary')
 }
 
+// Organizations API
+export const organizationsApi = {
+  getCurrent: () => api.get('/organizations/current'),
+  getAll: () => api.get('/organizations'),
+  getOne: (id) => api.get(`/organizations/${id}`),
+  create: (data) => api.post('/organizations', data),
+  update: (id, data) => api.put(`/organizations/${id}`, data),
+  getPartners: (id) => api.get(`/organizations/${id}/partners`),
+  getSummary: (id) => api.get(`/organizations/${id}/summary`)
+}
+
+// Investments API
+export const investmentsApi = {
+  getAll: (params) => api.get('/investments', { params }),
+  getOne: (id) => api.get(`/investments/${id}`),
+  create: (data) => api.post('/investments', data),
+  update: (id, data) => api.put(`/investments/${id}`, data),
+  delete: (id) => api.delete(`/investments/${id}`),
+  getSummary: () => api.get('/investments/summary')
+}
+
+// Fund Allocations API
+export const fundsApi = {
+  getAll: (params) => api.get('/funds', { params }),
+  getOne: (id) => api.get(`/funds/${id}`),
+  create: (data) => api.post('/funds', data),
+  updateStatus: (id, status) => api.put(`/funds/${id}/status`, { status }),
+  delete: (id) => api.delete(`/funds/${id}`),
+  getMySummary: () => api.get('/funds/my-summary')
+}
+
+// Bills API
+export const billsApi = {
+  getAll: (params) => api.get('/bills', { params }),
+  getOne: (id) => api.get(`/bills/${id}`),
+  create: (data) => api.post('/bills', data),
+  update: (id, data) => api.put(`/bills/${id}`, data),
+  updateStatus: (id, status) => api.put(`/bills/${id}/status`, { status }),
+  delete: (id) => api.delete(`/bills/${id}`),
+  getSummary: () => api.get('/bills/summary'),
+  uploadReceipt: (id, file) => {
+    const formData = new FormData()
+    formData.append('receipt', file)
+    return api.post(`/bills/${id}/receipt`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  }
+}
+
+// Attendance API
+export const attendanceApi = {
+  getAll: (params) => api.get('/attendance', { params }),
+  create: (data) => api.post('/attendance', data),
+  bulkCreate: (data) => api.post('/attendance/bulk', data),
+  update: (id, data) => api.put(`/attendance/${id}`, data),
+  delete: (id) => api.delete(`/attendance/${id}`),
+  getSummary: (workerId, params) => api.get(`/attendance/summary/${workerId}`, { params })
+}
+
+// Worker Ledger API
+export const ledgerApi = {
+  getAll: (params) => api.get('/ledger', { params }),
+  getOne: (id) => api.get(`/ledger/${id}`),
+  create: (data) => api.post('/ledger', data),
+  update: (id, data) => api.put(`/ledger/${id}`, data),
+  delete: (id) => api.delete(`/ledger/${id}`),
+  getBalance: (workerId) => api.get(`/ledger/balance/${workerId}`)
+}
+
 export default api
