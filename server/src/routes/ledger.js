@@ -1,5 +1,5 @@
 import express from 'express';
-import { WorkerLedger, User, Site } from '../models/index.js';
+import { WorkerLedger, User, Site, Contract } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -39,6 +39,7 @@ router.get('/', authenticate, async (req, res) => {
       .populate('worker', 'name email role')
       .populate('site', 'name')
       .populate('createdBy', 'name')
+      .populate('contract', 'title contractNumber totalAmount totalPaid status')
       .sort({ transactionDate: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
@@ -161,7 +162,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
-    const { workerId, siteId, type, amount, category, description, transactionDate, referenceNumber, paymentMode, fundAllocationId } = req.body;
+    const { workerId, siteId, type, amount, category, description, transactionDate, referenceNumber, paymentMode, fundAllocationId, contractId } = req.body;
 
     // Verify worker
     const worker = await User.findById(workerId);
@@ -185,12 +186,21 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       }
     }
 
+    // Verify contract if provided
+    if (contractId) {
+      const contract = await Contract.findById(contractId);
+      if (!contract) {
+        return res.status(404).json({ message: 'Contract not found' });
+      }
+    }
+
     const entry = new WorkerLedger({
       organization: req.user.organization,
       worker: workerId,
       site: siteId || null,
       createdBy: req.user._id,
       fundAllocation: fundAllocationId || null,
+      contract: contractId || null,
       type,
       amount,
       category,
@@ -205,6 +215,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
     if (siteId) await entry.populate('site', 'name');
     await entry.populate('createdBy', 'name');
     if (fundAllocationId) await entry.populate('fundAllocation');
+    if (contractId) await entry.populate('contract', 'title contractNumber totalAmount totalPaid status');
 
     res.status(201).json(entry);
   } catch (error) {
@@ -218,7 +229,8 @@ router.get('/:id', authenticate, async (req, res) => {
     const entry = await WorkerLedger.findById(req.params.id)
       .populate('worker', 'name email role')
       .populate('site', 'name')
-      .populate('createdBy', 'name');
+      .populate('createdBy', 'name')
+      .populate('contract', 'title contractNumber totalAmount totalPaid status');
 
     if (!entry) {
       return res.status(404).json({ message: 'Ledger entry not found' });

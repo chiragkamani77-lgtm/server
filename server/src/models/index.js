@@ -8,3 +8,4 @@ export { default as FundAllocation } from './FundAllocation.js';
 export { default as Bill } from './Bill.js';
 export { default as Attendance } from './Attendance.js';
 export { default as WorkerLedger } from './WorkerLedger.js';
+export { default as Contract } from './Contract.js';

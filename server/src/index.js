@@ -18,6 +18,7 @@ import fundsRoutes from './routes/funds.js';
 import billsRoutes from './routes/bills.js';
 import attendanceRoutes from './routes/attendance.js';
 import ledgerRoutes from './routes/ledger.js';
+import contractsRoutes from './routes/contracts.js';
 
 dotenv.config();
 
@@ -51,6 +52,7 @@ app.use('/api/funds', fundsRoutes);
 app.use('/api/bills', billsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/ledger', ledgerRoutes);
+app.use('/api/contracts', contractsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

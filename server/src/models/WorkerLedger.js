@@ -24,6 +24,10 @@ const workerLedgerSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'FundAllocation'
   },
+  contract: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Contract'
+  },
   type: {
     type: String,
     enum: ['credit', 'debit'],
@@ -36,7 +40,7 @@ const workerLedgerSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['salary', 'advance', 'bonus', 'deduction', 'reimbursement', 'other'],
+    enum: ['salary', 'advance', 'bonus', 'deduction', 'reimbursement', 'contract_payment', 'other'],
     required: true
   },
   description: {
@@ -66,6 +70,7 @@ workerLedgerSchema.index({ organization: 1, worker: 1 });
 workerLedgerSchema.index({ worker: 1, transactionDate: -1 });
 workerLedgerSchema.index({ site: 1, type: 1 });
 workerLedgerSchema.index({ fundAllocation: 1 });
+workerLedgerSchema.index({ contract: 1 });
 
 const WorkerLedger = mongoose.model('WorkerLedger', workerLedgerSchema);
 export default WorkerLedger;

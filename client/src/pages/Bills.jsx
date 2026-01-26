@@ -92,10 +92,14 @@ export default function Bills() {
 
   const fetchSites = async () => {
     try {
-      const { data } = await sitesApi.getAll()
-      setSites(data)
+      const [sitesRes, fundsRes] = await Promise.all([
+        sitesApi.getAll(),
+        fundsApi.getAll({ status: 'disbursed' })
+      ])
+      setSites(sitesRes.data)
+      setFundAllocations(fundsRes.data?.allocations || [])
     } catch (error) {
-      console.error('Error fetching sites:', error)
+      console.error('Error fetching data:', error)
     }
   }
 
@@ -130,6 +134,7 @@ export default function Bills() {
     try {
       const billData = {
         siteId: form.siteId || null,
+        fundAllocationId: form.fundAllocationId || null,
         vendorName: form.vendorName,
         vendorGstNumber: form.vendorGstNumber,
         invoiceNumber: form.invoiceNumber,
@@ -207,6 +212,7 @@ export default function Bills() {
   const resetForm = () => {
     setForm({
       siteId: '',
+      fundAllocationId: '',
       vendorName: '',
       vendorGstNumber: '',
       invoiceNumber: '',
@@ -561,6 +567,28 @@ export default function Bills() {
                   </Select>
                 </div>
               </div>
+              {fundAllocations.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Fund Source (Optional)</Label>
+                  <Select
+                    value={form.fundAllocationId}
+                    onValueChange={(value) => setForm({ ...form, fundAllocationId: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Link to fund allocation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No specific fund</SelectItem>
+                      {fundAllocations.map((allocation) => (
+                        <SelectItem key={allocation._id} value={allocation._id}>
+                          {allocation.fromUser?.name} → {formatCurrency(allocation.amount)} ({allocation.purpose})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Link this bill to a fund allocation for tracking</p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Base Amount (Rs.) *</Label>

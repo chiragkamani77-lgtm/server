@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { ledgerApi, sitesApi, usersApi } from '@/lib/api'
+import { ledgerApi, sitesApi, usersApi, fundsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -58,6 +58,7 @@ export default function WorkerLedger() {
   const [entries, setEntries] = useState([])
   const [sites, setSites] = useState([])
   const [workers, setWorkers] = useState([])
+  const [fundAllocations, setFundAllocations] = useState([])
   const [selectedWorkerBalance, setSelectedWorkerBalance] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
@@ -73,6 +74,7 @@ export default function WorkerLedger() {
   const [form, setForm] = useState({
     workerId: '',
     siteId: '',
+    fundAllocationId: '',
     type: 'debit',
     amount: '',
     category: 'salary',
@@ -100,12 +102,14 @@ export default function WorkerLedger() {
 
   const fetchInitialData = async () => {
     try {
-      const [sitesRes, workersRes] = await Promise.all([
+      const [sitesRes, workersRes, fundsRes] = await Promise.all([
         sitesApi.getAll(),
         usersApi.getChildren(),
+        fundsApi.getAll({ status: 'disbursed' })
       ])
       setSites(sitesRes.data)
       setWorkers(workersRes.data)
+      setFundAllocations(fundsRes.data?.allocations || [])
     } catch (error) {
       console.error('Error fetching initial data:', error)
     }
@@ -148,6 +152,7 @@ export default function WorkerLedger() {
       await ledgerApi.create({
         workerId: form.workerId,
         siteId: form.siteId || null,
+        fundAllocationId: form.fundAllocationId || null,
         type: form.type,
         amount: parseFloat(form.amount),
         category: form.category,
@@ -176,6 +181,7 @@ export default function WorkerLedger() {
     setForm({
       workerId: '',
       siteId: '',
+      fundAllocationId: '',
       type: 'debit',
       amount: '',
       category: 'salary',
@@ -565,6 +571,28 @@ export default function WorkerLedger() {
                   </Select>
                 </div>
               </div>
+              {fundAllocations.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Fund Source (Optional)</Label>
+                  <Select
+                    value={form.fundAllocationId}
+                    onValueChange={(value) => setForm({ ...form, fundAllocationId: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Link to fund allocation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No specific fund</SelectItem>
+                      {fundAllocations.map((allocation) => (
+                        <SelectItem key={allocation._id} value={allocation._id}>
+                          {allocation.fromUser?.name} → {formatCurrency(allocation.amount)} ({allocation.purpose})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Link this entry to a fund allocation for tracking</p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Reference Number</Label>
                 <Input

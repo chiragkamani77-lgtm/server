@@ -189,4 +189,17 @@ export const ledgerApi = {
   getBalance: (workerId) => api.get(`/ledger/balance/${workerId}`)
 }
 
+// Contracts API
+export const contractsApi = {
+  getAll: (params) => api.get('/contracts', { params }),
+  getOne: (id) => api.get(`/contracts/${id}`),
+  create: (data) => api.post('/contracts', data),
+  update: (id, data) => api.put(`/contracts/${id}`, data),
+  delete: (id) => api.delete(`/contracts/${id}`),
+  getSummary: () => api.get('/contracts/summary'),
+  activate: (id) => api.put(`/contracts/${id}/activate`),
+  recordPayment: (id, data) => api.post(`/contracts/${id}/payment`, data),
+  getAttendanceSalary: (id, params) => api.get(`/contracts/${id}/attendance-salary`, { params })
+}
+
 export default api
