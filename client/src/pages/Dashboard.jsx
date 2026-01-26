@@ -6,11 +6,12 @@ import { Badge } from '@/components/ui/badge'
 import { formatCurrency, STATUS_COLORS } from '@/lib/utils'
 import { Building, IndianRupee, Receipt, TrendingUp } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { OrganizationSetup } from '@/components/OrganizationSetup'
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D']
 
 export default function Dashboard() {
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin, hasOrganization } = useAuth()
   const [sites, setSites] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -43,6 +44,11 @@ export default function Dashboard() {
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
       </div>
     )
+  }
+
+  // Show organization setup for admins without an organization
+  if (isAdmin && !hasOrganization) {
+    return <OrganizationSetup />
   }
 
   const totalSites = sites.length

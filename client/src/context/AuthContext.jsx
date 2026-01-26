@@ -53,12 +53,14 @@ export function AuthProvider({ children }) {
     login,
     register,
     logout,
+    refreshUser: checkAuth,
     isAuthenticated: !!user,
     isAdmin: user?.role === 1,
     isSupervisor: user?.role === 2,
     isWorker: user?.role === 3,
     canManageUsers: user?.role === 1 || user?.role === 2,
     canManageSites: user?.role === 1,
+    hasOrganization: !!user?.organization,
   }
 
   return (
