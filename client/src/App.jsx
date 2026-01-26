@@ -17,6 +17,7 @@ import FundAllocations from '@/pages/FundAllocations'
 import Bills from '@/pages/Bills'
 import Attendance from '@/pages/Attendance'
 import WorkerLedger from '@/pages/WorkerLedger'
+import Organization from '@/pages/Organization'
 
 // Protected route wrapper for role-based access
 function ProtectedRoute({ children, allowedRoles }) {
@@ -109,6 +110,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={[1, 2, 3]}>
               <WorkerLedger />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/organization"
+          element={
+            <ProtectedRoute allowedRoles={[1]}>
+              <Organization />
             </ProtectedRoute>
           }
         />

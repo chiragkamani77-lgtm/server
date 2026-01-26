@@ -65,6 +65,7 @@ export default function Investments() {
 
   useEffect(() => {
     fetchData()
+    fetchPartners()
   }, [pagination.page])
 
   const fetchData = async () => {
@@ -77,7 +78,6 @@ export default function Investments() {
       setInvestments(investmentsRes.data.investments)
       setPagination(investmentsRes.data.pagination)
       setSummary(summaryRes.data)
-      setPartners(summaryRes.data.partnerInvestments.map(p => p.partner))
     } catch (error) {
       toast({
         title: 'Error',
@@ -86,6 +86,16 @@ export default function Investments() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchPartners = async () => {
+    try {
+      const orgRes = await organizationsApi.getCurrent()
+      const partnersRes = await organizationsApi.getPartners(orgRes.data._id)
+      setPartners(partnersRes.data)
+    } catch (error) {
+      console.error('Failed to fetch partners:', error)
     }
   }
 

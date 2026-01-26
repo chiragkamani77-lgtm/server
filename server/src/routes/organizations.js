@@ -140,6 +140,87 @@ router.get('/:id/partners', authenticate, async (req, res) => {
   }
 });
 
+// Add partner to organization (Level 1 only)
+router.post('/:id/partners', authenticate, requireRole(1), async (req, res) => {
+  try {
+    const organization = await Organization.findById(req.params.id);
+
+    if (!organization) {
+      return res.status(404).json({ message: 'Organization not found' });
+    }
+
+    // Check if user belongs to this organization
+    if (req.user.organization?.toString() !== organization._id.toString()) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Check if user is a Level 1 (Developer/Partner)
+    if (user.role !== 1) {
+      return res.status(400).json({ message: 'Only Level 1 users can be added as partners' });
+    }
+
+    // Check if user already belongs to an organization
+    if (user.organization) {
+      return res.status(400).json({ message: 'User already belongs to an organization' });
+    }
+
+    user.organization = organization._id;
+    await user.save();
+
+    res.json({ message: 'Partner added successfully', user: { _id: user._id, name: user.name, email: user.email } });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Remove partner from organization (Level 1 only)
+router.delete('/:id/partners/:userId', authenticate, requireRole(1), async (req, res) => {
+  try {
+    const organization = await Organization.findById(req.params.id);
+
+    if (!organization) {
+      return res.status(404).json({ message: 'Organization not found' });
+    }
+
+    // Check if user belongs to this organization
+    if (req.user.organization?.toString() !== organization._id.toString()) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Cannot remove yourself
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ message: 'Cannot remove yourself from the organization' });
+    }
+
+    // Check if user belongs to this organization
+    if (user.organization?.toString() !== organization._id.toString()) {
+      return res.status(400).json({ message: 'User does not belong to this organization' });
+    }
+
+    user.organization = null;
+    await user.save();
+
+    res.json({ message: 'Partner removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get organization summary stats
 router.get('/:id/summary', authenticate, async (req, res) => {
   try {

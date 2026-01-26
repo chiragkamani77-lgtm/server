@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard,
   Building,
+  Building2,
   Receipt,
   Users,
   FileText,
@@ -81,6 +82,12 @@ const navItems = [
     href: '/categories',
     icon: Settings,
     roles: [1, 2],
+  },
+  {
+    title: 'Organization',
+    href: '/organization',
+    icon: Building2,
+    roles: [1],
   }
 ]
 

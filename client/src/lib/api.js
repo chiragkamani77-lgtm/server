@@ -124,6 +124,8 @@ export const organizationsApi = {
   create: (data) => api.post('/organizations', data),
   update: (id, data) => api.put(`/organizations/${id}`, data),
   getPartners: (id) => api.get(`/organizations/${id}/partners`),
+  addPartner: (id, userId) => api.post(`/organizations/${id}/partners`, { userId }),
+  removePartner: (id, userId) => api.delete(`/organizations/${id}/partners/${userId}`),
   getSummary: (id) => api.get(`/organizations/${id}/summary`)
 }
 
