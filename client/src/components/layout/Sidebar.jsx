@@ -14,6 +14,7 @@ import {
   FileSpreadsheet,
   Calendar,
   Wallet,
+  X,
 } from 'lucide-react'
 
 const navItems = [
@@ -91,7 +92,7 @@ const navItems = [
   }
 ]
 
-export function Sidebar() {
+export function Sidebar({ isMobile = false, isOpen = false, onClose = () => {} }) {
   const location = useLocation()
   const { user } = useAuth()
 
@@ -99,25 +100,76 @@ export function Sidebar() {
     item.roles.includes(user?.role)
   )
 
+  const handleLinkClick = () => {
+    if (isMobile) {
+      onClose()
+    }
+  }
+
+  const sidebarContent = (
+    <nav className="flex flex-col gap-2 p-4">
+      {filteredItems.map((item) => (
+        <Link
+          key={item.href}
+          to={item.href}
+          onClick={handleLinkClick}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-gray-500 transition-all hover:text-gray-900',
+            location.pathname === item.href
+              ? 'bg-gray-100 text-gray-900'
+              : ''
+          )}
+        >
+          <item.icon className="h-4 w-4" />
+          {item.title}
+        </Link>
+      ))}
+    </nav>
+  )
+
+  // Desktop sidebar - always visible on md and above
+  if (!isMobile) {
+    return (
+      <aside className="hidden w-64 border-r bg-gray-50/40 md:block">
+        {sidebarContent}
+      </aside>
+    )
+  }
+
+  // Mobile sidebar - drawer/overlay
+  if (!isOpen) return null
+
   return (
-    <aside className="hidden w-64 border-r bg-gray-50/40 md:block">
-      <nav className="flex flex-col gap-2 p-4">
-        {filteredItems.map((item) => (
-          <Link
-            key={item.href}
-            to={item.href}
-            className={cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2 text-gray-500 transition-all hover:text-gray-900',
-              location.pathname === item.href
-                ? 'bg-gray-100 text-gray-900'
-                : ''
-            )}
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/50 md:hidden"
+        onClick={onClose}
+      />
+
+      {/* Drawer */}
+      <aside
+        className={cn(
+          'fixed left-0 top-0 z-50 h-full w-64 border-r bg-white shadow-xl md:hidden',
+          'transform transition-transform duration-300 ease-in-out',
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        {/* Close button */}
+        <div className="flex items-center justify-between border-b p-4">
+          <div className="flex items-center space-x-2">
+            <Building2 className="h-6 w-6" />
+            <span className="font-bold">Menu</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
           >
-            <item.icon className="h-4 w-4" />
-            {item.title}
-          </Link>
-        ))}
-      </nav>
-    </aside>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {sidebarContent}
+      </aside>
+    </>
   )
 }

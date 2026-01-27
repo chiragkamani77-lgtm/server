@@ -11,10 +11,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Building2, LogOut, User } from 'lucide-react'
+import { Building2, LogOut, User, Menu } from 'lucide-react'
 import { ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
 
-export function Header() {
+export function Header({ onMenuClick }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
@@ -35,6 +35,16 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-14 items-center">
+        {/* Hamburger menu button - visible only on mobile */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="mr-2 md:hidden"
+          onClick={onMenuClick}
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+
         <Link to="/" className="flex items-center space-x-2">
           <Building2 className="h-6 w-6" />
           <span className="font-bold">BillingSite</span>
