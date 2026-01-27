@@ -60,9 +60,11 @@ export default function WorkerLedger() {
   const [workers, setWorkers] = useState([])
   const [fundAllocations, setFundAllocations] = useState([])
   const [selectedWorkerBalance, setSelectedWorkerBalance] = useState(null)
+  const [selectedWorkerPendingSalary, setSelectedWorkerPendingSalary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [isPaySalaryOpen, setIsPaySalaryOpen] = useState(false)
 
   const [filters, setFilters] = useState({
     workerId: '',
@@ -84,6 +86,15 @@ export default function WorkerLedger() {
     paymentMode: 'cash',
   })
 
+  const [paySalaryForm, setPaySalaryForm] = useState({
+    fundAllocationId: '',
+    amount: '',
+    deductAdvances: true,
+    paymentMode: 'cash',
+    referenceNumber: '',
+    notes: '',
+  })
+
   useEffect(() => {
     fetchInitialData()
   }, [])
@@ -95,8 +106,10 @@ export default function WorkerLedger() {
   useEffect(() => {
     if (filters.workerId) {
       fetchWorkerBalance(filters.workerId)
+      fetchWorkerPendingSalary(filters.workerId)
     } else {
       setSelectedWorkerBalance(null)
+      setSelectedWorkerPendingSalary(null)
     }
   }, [filters.workerId])
 
@@ -143,6 +156,16 @@ export default function WorkerLedger() {
       setSelectedWorkerBalance(data)
     } catch (error) {
       console.error('Error fetching balance:', error)
+    }
+  }
+
+  const fetchWorkerPendingSalary = async (workerId) => {
+    try {
+      const { data } = await ledgerApi.getPendingSalary(workerId)
+      setSelectedWorkerPendingSalary(data)
+    } catch (error) {
+      console.error('Error fetching pending salary:', error)
+      setSelectedWorkerPendingSalary(null)
     }
   }
 
@@ -195,6 +218,59 @@ export default function WorkerLedger() {
   const clearFilters = () => {
     setFilters({ workerId: '', siteId: '', type: '', category: '' })
     setPagination({ ...pagination, page: 1 })
+  }
+
+  const handlePaySalary = async (e) => {
+    e.preventDefault()
+    if (!filters.workerId) return
+
+    try {
+      await ledgerApi.paySalary(filters.workerId, {
+        fundAllocationId: paySalaryForm.fundAllocationId || null,
+        amount: parseFloat(paySalaryForm.amount),
+        deductAdvances: paySalaryForm.deductAdvances,
+        paymentMode: paySalaryForm.paymentMode,
+        referenceNumber: paySalaryForm.referenceNumber,
+        notes: paySalaryForm.notes,
+      })
+
+      toast({ title: 'Salary paid successfully' })
+      setIsPaySalaryOpen(false)
+      resetPaySalaryForm()
+      fetchEntries()
+      fetchWorkerBalance(filters.workerId)
+      fetchWorkerPendingSalary(filters.workerId)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to pay salary',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const resetPaySalaryForm = () => {
+    setPaySalaryForm({
+      fundAllocationId: '',
+      amount: '',
+      deductAdvances: true,
+      paymentMode: 'cash',
+      referenceNumber: '',
+      notes: '',
+    })
+  }
+
+  const openPaySalaryDialog = () => {
+    if (!selectedWorkerPendingSalary) return
+
+    // Pre-fill amount with net payable
+    const netPayable = selectedWorkerPendingSalary.netPayable || 0
+    setPaySalaryForm({
+      ...paySalaryForm,
+      amount: netPayable > 0 ? netPayable.toString() : '',
+      deductAdvances: true,
+    })
+    setIsPaySalaryOpen(true)
   }
 
   // Calculate totals from current entries
@@ -264,6 +340,53 @@ export default function WorkerLedger() {
           </Card>
         )}
       </div>
+
+      {/* Pending Salary Summary Card */}
+      {selectedWorkerPendingSalary && selectedWorkerPendingSalary.totalPending > 0 && (
+        <Card className="border-orange-300 bg-orange-50">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg">Pending Salary Summary - {selectedWorkerPendingSalary.worker.name}</CardTitle>
+                <CardDescription>Accumulated from attendance records</CardDescription>
+              </div>
+              {(isAdmin || isSupervisor) && (
+                <Button onClick={openPaySalaryDialog}>
+                  <Wallet className="h-4 w-4 mr-2" />
+                  Pay Salary
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Total Pending Salary</p>
+                <p className="text-2xl font-bold text-orange-600">
+                  {formatCurrency(selectedWorkerPendingSalary.totalPending)}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Outstanding Advances</p>
+                <p className="text-2xl font-bold text-red-600">
+                  {formatCurrency(selectedWorkerPendingSalary.totalAdvances)}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">Net Payable</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {formatCurrency(selectedWorkerPendingSalary.netPayable)}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs text-muted-foreground">
+                Based on {selectedWorkerPendingSalary.attendanceCount || 0} attendance records
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card>
@@ -612,6 +735,138 @@ export default function WorkerLedger() {
             </div>
             <DialogFooter>
               <Button type="submit">Add Entry</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pay Salary Dialog */}
+      <Dialog open={isPaySalaryOpen} onOpenChange={setIsPaySalaryOpen}>
+        <DialogContent className="max-w-lg">
+          <form onSubmit={handlePaySalary}>
+            <DialogHeader>
+              <DialogTitle>Pay Salary</DialogTitle>
+              <DialogDescription>
+                {selectedWorkerPendingSalary && (
+                  <span>
+                    Pay pending salary to {selectedWorkerPendingSalary.worker.name}
+                  </span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+              {selectedWorkerPendingSalary && (
+                <div className="bg-blue-50 p-4 rounded-lg space-y-2 border border-blue-200">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Total Pending Salary:</span>
+                    <span className="font-bold text-orange-600">
+                      {formatCurrency(selectedWorkerPendingSalary.totalPending)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Outstanding Advances:</span>
+                    <span className="font-bold text-red-600">
+                      -{formatCurrency(selectedWorkerPendingSalary.totalAdvances)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-2 border-t border-blue-300">
+                    <span className="font-medium">Net Payable:</span>
+                    <span className="font-bold text-green-700 text-lg">
+                      {formatCurrency(selectedWorkerPendingSalary.netPayable)}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label>Amount to Pay (Rs.) *</Label>
+                <Input
+                  type="number"
+                  value={paySalaryForm.amount}
+                  onChange={(e) => setPaySalaryForm({ ...paySalaryForm, amount: e.target.value })}
+                  placeholder="Enter amount"
+                  required
+                  min="0"
+                  step="0.01"
+                />
+                <p className="text-xs text-muted-foreground">
+                  You can pay partial or full amount
+                </p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="deductAdvances"
+                    checked={paySalaryForm.deductAdvances}
+                    onChange={(e) => setPaySalaryForm({ ...paySalaryForm, deductAdvances: e.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="deductAdvances" className="text-sm font-normal cursor-pointer">
+                    Automatically deduct outstanding advances from this payment
+                  </Label>
+                </div>
+              </div>
+              {fundAllocations.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Fund Source (Optional)</Label>
+                  <Select
+                    value={paySalaryForm.fundAllocationId}
+                    onValueChange={(value) => setPaySalaryForm({ ...paySalaryForm, fundAllocationId: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select fund allocation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No specific fund</SelectItem>
+                      {fundAllocations.map((allocation) => (
+                        <SelectItem key={allocation._id} value={allocation._id}>
+                          {allocation.fromUser?.name} → {formatCurrency(allocation.amount)} ({allocation.purpose})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Payment Mode *</Label>
+                  <Select
+                    value={paySalaryForm.paymentMode}
+                    onValueChange={(value) => setPaySalaryForm({ ...paySalaryForm, paymentMode: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map((mode) => (
+                        <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Reference Number</Label>
+                  <Input
+                    value={paySalaryForm.referenceNumber}
+                    onChange={(e) => setPaySalaryForm({ ...paySalaryForm, referenceNumber: e.target.value })}
+                    placeholder="UTR / Cheque No."
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea
+                  value={paySalaryForm.notes}
+                  onChange={(e) => setPaySalaryForm({ ...paySalaryForm, notes: e.target.value })}
+                  placeholder="Salary payment for the month..."
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsPaySalaryOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Pay Salary</Button>
             </DialogFooter>
           </form>
         </DialogContent>

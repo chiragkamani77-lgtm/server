@@ -88,6 +88,10 @@ const billSchema = new mongoose.Schema({
     type: Number,
     enum: [0, 5, 12, 18, 28],
     default: 18
+  },
+  linkedInvestment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Investment'
   }
 }, {
   timestamps: true

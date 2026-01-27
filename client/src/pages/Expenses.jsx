@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { expensesApi, sitesApi, categoriesApi, fundsApi } from '@/lib/api'
+import { expensesApi, sitesApi, categoriesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,6 +24,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -32,7 +42,8 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Filter, Trash2, Upload, ChevronLeft, ChevronRight, CheckCircle, Eye, X } from 'lucide-react'
+import { Plus, Filter, Trash2, Upload, ChevronLeft, ChevronRight, CheckCircle, Eye, X, Edit } from 'lucide-react'
+import { FundAllocationSelector } from '@/components/FundAllocationSelector'
 
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -58,10 +69,11 @@ export default function Expenses() {
   const [expenses, setExpenses] = useState([])
   const [sites, setSites] = useState([])
   const [categories, setCategories] = useState([])
-  const [fundAllocations, setFundAllocations] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [deleteId, setDeleteId] = useState(null)
   const [selectedFile, setSelectedFile] = useState(null)
   const [approveExpense, setApproveExpense] = useState(null)
   const [viewExpense, setViewExpense] = useState(null)
@@ -83,6 +95,7 @@ export default function Expenses() {
   const [form, setForm] = useState({
     siteId: '',
     categoryId: '',
+    fundAllocationId: '',
     amount: '',
     description: '',
     vendorName: '',
@@ -99,14 +112,12 @@ export default function Expenses() {
 
   const fetchInitialData = async () => {
     try {
-      const [sitesRes, categoriesRes, fundsRes] = await Promise.all([
+      const [sitesRes, categoriesRes] = await Promise.all([
         sitesApi.getAll(),
         categoriesApi.getAll(),
-        fundsApi.getAll({ status: 'disbursed' }),
       ])
       setSites(sitesRes.data)
       setCategories(categoriesRes.data)
-      setFundAllocations(fundsRes.data?.allocations || [])
     } catch (error) {
       console.error('Error fetching initial data:', error)
     }
@@ -134,39 +145,64 @@ export default function Expenses() {
     }
   }
 
-  const handleAdd = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      const { data } = await expensesApi.create({
+      const expenseData = {
         siteId: form.siteId,
         categoryId: form.categoryId,
+        fundAllocationId: form.fundAllocationId,
         amount: parseFloat(form.amount),
         description: form.description,
         vendorName: form.vendorName,
         expenseDate: form.expenseDate,
-      })
-
-      if (selectedFile) {
-        await expensesApi.uploadReceipt(data._id, selectedFile)
       }
 
-      toast({ title: 'Expense added successfully' })
+      if (editingId) {
+        await expensesApi.update(editingId, expenseData)
+        if (selectedFile) {
+          await expensesApi.uploadReceipt(editingId, selectedFile)
+        }
+        toast({ title: 'Expense updated successfully' })
+      } else {
+        const { data } = await expensesApi.create(expenseData)
+        if (selectedFile) {
+          await expensesApi.uploadReceipt(data._id, selectedFile)
+        }
+        toast({ title: 'Expense added successfully' })
+      }
+
       setIsAddOpen(false)
       resetForm()
       fetchExpenses()
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.message || 'Failed to add expense',
+        description: error.response?.data?.message || 'Failed to save expense',
         variant: 'destructive',
       })
     }
   }
 
-  const handleDelete = async (id) => {
+  const handleEdit = (expense) => {
+    setForm({
+      siteId: expense.site?._id || '',
+      categoryId: expense.category?._id || '',
+      fundAllocationId: expense.fundAllocation?._id || '',
+      amount: (expense.requestedAmount || expense.amount).toString(),
+      description: expense.description || '',
+      vendorName: expense.vendorName || '',
+      expenseDate: expense.expenseDate.split('T')[0],
+    })
+    setEditingId(expense._id)
+    setIsAddOpen(true)
+  }
+
+  const handleDelete = async () => {
     try {
-      await expensesApi.delete(id)
+      await expensesApi.delete(deleteId)
       toast({ title: 'Expense deleted' })
+      setDeleteId(null)
       fetchExpenses()
     } catch (error) {
       toast({
@@ -181,12 +217,14 @@ export default function Expenses() {
     setForm({
       siteId: '',
       categoryId: '',
+      fundAllocationId: '',
       amount: '',
       description: '',
       vendorName: '',
       expenseDate: new Date().toISOString().split('T')[0],
     })
     setSelectedFile(null)
+    setEditingId(null)
   }
 
   const clearFilters = () => {
@@ -459,12 +497,24 @@ export default function Expenses() {
                           Mark Paid
                         </Button>
                       )}
+                      {/* Developer can edit any pending, others only their own pending */}
+                      {(isAdmin || (expense.user?._id === user?._id && expense.status === 'pending')) && expense.status === 'pending' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEdit(expense)}
+                          title="Edit expense"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      )}
                       {/* Developer can delete any, others only their own pending */}
                       {(isAdmin || (expense.user?._id === user?._id && expense.status === 'pending')) && (
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleDelete(expense._id)}
+                          onClick={() => setDeleteId(expense._id)}
+                          title="Delete expense"
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -504,13 +554,16 @@ export default function Expenses() {
       )}
 
       {/* Add Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+      <Dialog open={isAddOpen} onOpenChange={(open) => {
+        setIsAddOpen(open)
+        if (!open) resetForm()
+      }}>
         <DialogContent>
-          <form onSubmit={handleAdd}>
+          <form onSubmit={handleSubmit}>
             <DialogHeader>
-              <DialogTitle>Add Expense</DialogTitle>
+              <DialogTitle>{editingId ? 'Edit' : 'Add'} Expense</DialogTitle>
               <DialogDescription>
-                Record a new expense entry
+                {editingId ? 'Update expense entry' : 'Record a new expense entry'}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -552,6 +605,13 @@ export default function Expenses() {
                   </SelectContent>
                 </Select>
               </div>
+              <FundAllocationSelector
+                value={form.fundAllocationId}
+                onChange={(value) => setForm({ ...form, fundAllocationId: value })}
+                requestedAmount={parseFloat(form.amount || 0)}
+                required={true}
+                label="Fund Allocation"
+              />
               <div className="space-y-2">
                 <Label>{isAdmin ? 'Amount (Rs.)' : 'Requested Amount (Rs.)'}</Label>
                 <Input
@@ -604,7 +664,7 @@ export default function Expenses() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="submit">Add Expense</Button>
+              <Button type="submit">{editingId ? 'Update' : 'Add'} Expense</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -830,6 +890,24 @@ export default function Expenses() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Expense?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this expense record. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

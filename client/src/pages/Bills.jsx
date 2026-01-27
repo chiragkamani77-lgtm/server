@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { billsApi, sitesApi, fundsApi } from '@/lib/api'
+import { billsApi, sitesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,7 +32,8 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Receipt, FileText, CreditCard, ChevronLeft, ChevronRight, Trash2, Edit, Check, Filter, Download, Upload, Eye, X } from 'lucide-react'
+import { Plus, Receipt, FileText, CreditCard, ChevronLeft, ChevronRight, Trash2, Edit, Check, Filter, Download, Upload, Eye, X, TrendingUp } from 'lucide-react'
+import { InvestmentSelector } from '@/components/InvestmentSelector'
 
 const BILL_TYPES = [
   { value: 'material', label: 'Material' },
@@ -74,7 +75,6 @@ export default function Bills() {
 
   const [bills, setBills] = useState([])
   const [sites, setSites] = useState([])
-  const [fundAllocations, setFundAllocations] = useState([])
   const [summary, setSummary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
@@ -93,11 +93,12 @@ export default function Bills() {
 
   const [form, setForm] = useState({
     siteId: '',
-    fundAllocationId: '',
+    linkedInvestment: '',
     vendorName: '',
     vendorGstNumber: '',
     invoiceNumber: '',
     billDate: new Date().toISOString().split('T')[0],
+    totalAmount: '',
     baseAmount: '',
     gstAmount: '',
     gstRate: 18,
@@ -117,13 +118,11 @@ export default function Bills() {
 
   const fetchSites = async () => {
     try {
-      const [sitesRes, fundsRes, vendorsRes] = await Promise.all([
+      const [sitesRes, vendorsRes] = await Promise.all([
         sitesApi.getAll(),
-        fundsApi.getAll({ status: 'disbursed' }),
         billsApi.getVendorSuggestions()
       ])
       setSites(sitesRes.data)
-      setFundAllocations(fundsRes.data?.allocations || [])
       setVendorSuggestions(vendorsRes.data || [])
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -161,7 +160,7 @@ export default function Bills() {
     try {
       const billData = {
         siteId: form.siteId || null,
-        fundAllocationId: form.fundAllocationId || null,
+        linkedInvestment: form.linkedInvestment || null,
         vendorName: form.vendorName,
         vendorGstNumber: form.vendorGstNumber,
         invoiceNumber: form.invoiceNumber,
@@ -209,13 +208,15 @@ export default function Bills() {
   }
 
   const handleEdit = (bill) => {
+    const totalAmount = bill.totalAmount || (parseFloat(bill.baseAmount) + parseFloat(bill.gstAmount))
     setForm({
       siteId: bill.site?._id || '',
-      fundAllocationId: bill.fundAllocation?._id || '',
+      linkedInvestment: bill.linkedInvestment?._id || '',
       vendorName: bill.vendorName,
       vendorGstNumber: bill.vendorGstNumber || '',
       invoiceNumber: bill.invoiceNumber || '',
       billDate: bill.billDate.split('T')[0],
+      totalAmount: totalAmount.toString(),
       baseAmount: bill.baseAmount.toString(),
       gstAmount: bill.gstAmount.toString(),
       gstRate: bill.gstRate || 18,
@@ -246,11 +247,12 @@ export default function Bills() {
   const resetForm = () => {
     setForm({
       siteId: '',
-      fundAllocationId: '',
+      linkedInvestment: '',
       vendorName: '',
       vendorGstNumber: '',
       invoiceNumber: '',
       billDate: new Date().toISOString().split('T')[0],
+      totalAmount: '',
       baseAmount: '',
       gstAmount: '',
       gstRate: 18,
@@ -263,15 +265,27 @@ export default function Bills() {
   }
 
   const handleGstRateChange = (rate) => {
-    const baseAmount = parseFloat(form.baseAmount) || 0
-    const gstAmount = (baseAmount * rate) / 100
-    setForm({ ...form, gstRate: rate, gstAmount: gstAmount.toFixed(2) })
+    const totalAmount = parseFloat(form.totalAmount) || 0
+    const baseAmount = totalAmount / (1 + rate / 100)
+    const gstAmount = totalAmount - baseAmount
+    setForm({
+      ...form,
+      gstRate: rate,
+      baseAmount: baseAmount.toFixed(2),
+      gstAmount: gstAmount.toFixed(2)
+    })
   }
 
-  const handleBaseAmountChange = (value) => {
-    const baseAmount = parseFloat(value) || 0
-    const gstAmount = (baseAmount * form.gstRate) / 100
-    setForm({ ...form, baseAmount: value, gstAmount: gstAmount.toFixed(2) })
+  const handleTotalAmountChange = (value) => {
+    const totalAmount = parseFloat(value) || 0
+    const baseAmount = totalAmount / (1 + form.gstRate / 100)
+    const gstAmount = totalAmount - baseAmount
+    setForm({
+      ...form,
+      totalAmount: value,
+      baseAmount: baseAmount.toFixed(2),
+      gstAmount: gstAmount.toFixed(2)
+    })
   }
 
   const handleReceiptUpload = async (billId, file) => {
@@ -538,7 +552,15 @@ export default function Bills() {
                   <TableCell className="text-right">{formatCurrency(bill.gstAmount)}</TableCell>
                   <TableCell className="text-right font-bold">{formatCurrency(bill.totalAmount)}</TableCell>
                   <TableCell>
-                    <Badge className={STATUS_COLORS[bill.status]}>{bill.status}</Badge>
+                    <div className="flex flex-col gap-1">
+                      <Badge className={STATUS_COLORS[bill.status]}>{bill.status}</Badge>
+                      {bill.status === 'credited' && bill.fundAllocation && (
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                          <TrendingUp className="h-3 w-3 mr-1" />
+                          Investment Created
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {bill.receiptPath ? (
@@ -740,36 +762,21 @@ export default function Bills() {
                   </Select>
                 </div>
               </div>
-              {fundAllocations.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Fund Source (Optional)</Label>
-                  <Select
-                    value={form.fundAllocationId}
-                    onValueChange={(value) => setForm({ ...form, fundAllocationId: value === 'none' ? '' : value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Link to fund allocation" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No specific fund</SelectItem>
-                      {fundAllocations.map((allocation) => (
-                        <SelectItem key={allocation._id} value={allocation._id}>
-                          {allocation.fromUser?.name} → {formatCurrency(allocation.amount)} ({allocation.purpose})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">Link this bill to a fund allocation for tracking</p>
-                </div>
-              )}
+              <InvestmentSelector
+                value={form.linkedInvestment}
+                onChange={(value) => setForm({ ...form, linkedInvestment: value })}
+                requestedAmount={parseFloat(form.totalAmount || 0)}
+                required={true}
+                label="Investment"
+              />
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>Base Amount (Rs.) *</Label>
+                  <Label>Total Amount (Inc. GST) *</Label>
                   <Input
                     type="number"
-                    value={form.baseAmount}
-                    onChange={(e) => handleBaseAmountChange(e.target.value)}
-                    placeholder="10000"
+                    value={form.totalAmount}
+                    onChange={(e) => handleTotalAmountChange(e.target.value)}
+                    placeholder="11800"
                     required
                     min="0"
                   />
@@ -791,23 +798,32 @@ export default function Bills() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>GST Amount (Rs.)</Label>
+                  <Label>Base Amount (Rs.)</Label>
                   <Input
                     type="number"
-                    value={form.gstAmount}
-                    onChange={(e) => setForm({ ...form, gstAmount: e.target.value })}
-                    placeholder="1800"
-                    min="0"
+                    value={form.baseAmount}
+                    readOnly
+                    placeholder="10000"
+                    className="bg-muted"
                   />
                 </div>
               </div>
-              {form.baseAmount && (
-                <div className="p-3 bg-muted rounded-lg">
-                  <p className="text-sm text-muted-foreground">
-                    Total Amount: <span className="font-bold text-foreground">
-                      {formatCurrency(parseFloat(form.baseAmount || 0) + parseFloat(form.gstAmount || 0))}
-                    </span>
-                  </p>
+              {form.totalAmount && (
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Total Amount (Inc. GST)</p>
+                      <p className="text-lg font-bold text-blue-600">{formatCurrency(parseFloat(form.totalAmount || 0))}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Base Amount</p>
+                      <p className="text-lg font-semibold">{formatCurrency(parseFloat(form.baseAmount || 0))}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">GST ({form.gstRate}%)</p>
+                      <p className="text-lg font-semibold">{formatCurrency(parseFloat(form.gstAmount || 0))}</p>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="space-y-2">

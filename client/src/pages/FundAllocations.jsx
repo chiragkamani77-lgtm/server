@@ -472,7 +472,7 @@ export default function FundAllocations() {
                           </Button>
                         </>
                       )}
-                      {/* {allocation.toUser?._id === user._id && allocation.status === 'approved' && ( */}
+                      {allocation.toUser?._id === user._id && allocation.status === 'approved' && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -480,7 +480,7 @@ export default function FundAllocations() {
                         >
                           Mark Received
                         </Button>
-                      {/* )} */}
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

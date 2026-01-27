@@ -1,8 +1,63 @@
 import express from 'express';
-import { Attendance, User, Site } from '../models/index.js';
+import { Attendance, User, Site, WorkerLedger } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Helper function to create pending salary entry from attendance
+async function createPendingSalaryEntry(attendance, worker, markedBy) {
+  try {
+    // Check if worker has daily rate configured
+    if (!worker.dailyRate || worker.dailyRate <= 0) {
+      console.warn(`Worker ${worker._id} does not have daily rate configured. Skipping pending salary creation.`);
+      return null;
+    }
+
+    // Calculate salary for this attendance
+    const hourlyRate = worker.dailyRate / 8;
+    let baseSalary = 0;
+
+    if (attendance.status === 'present') {
+      baseSalary = worker.dailyRate;
+    } else if (attendance.status === 'half_day') {
+      baseSalary = worker.dailyRate / 2;
+    } else {
+      // absent or leave - no salary
+      baseSalary = 0;
+    }
+
+    const overtimePay = (attendance.overtime || 0) * hourlyRate;
+    const totalEarnings = baseSalary + overtimePay;
+
+    // Don't create entry if no earnings
+    if (totalEarnings <= 0) {
+      return null;
+    }
+
+    // Create pending salary entry in worker ledger
+    const ledgerEntry = new WorkerLedger({
+      organization: attendance.organization,
+      worker: attendance.worker,
+      site: attendance.site,
+      createdBy: markedBy,
+      type: 'credit',
+      category: 'pending_salary',
+      amount: totalEarnings,
+      description: `Pending salary for ${attendance.date.toISOString().split('T')[0]} (${attendance.status})`,
+      status: 'pending',
+      linkedAttendance: attendance._id,
+      periodStart: attendance.date,
+      periodEnd: attendance.date,
+      transactionDate: attendance.date
+    });
+
+    await ledgerEntry.save();
+    return ledgerEntry;
+  } catch (error) {
+    console.error('Error creating pending salary entry:', error);
+    return null;
+  }
+}
 
 // Get attendance records
 router.get('/', authenticate, async (req, res) => {
@@ -250,7 +305,17 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
     await attendance.populate('site', 'name');
     await attendance.populate('markedBy', 'name');
 
-    res.status(201).json(attendance);
+    // Auto-create pending salary entry
+    const pendingSalary = await createPendingSalaryEntry(attendance, worker, req.user._id);
+
+    res.status(201).json({
+      attendance,
+      pendingSalaryCreated: !!pendingSalary,
+      pendingSalary: pendingSalary ? {
+        amount: pendingSalary.amount,
+        description: pendingSalary.description
+      } : null
+    });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'Attendance already marked for this worker on this date' });
@@ -279,6 +344,7 @@ router.post('/bulk', authenticate, requireRole(1, 2, 3), async (req, res) => {
 
     const results = [];
     const errors = [];
+    const pendingSalariesCreated = [];
 
     for (const item of attendanceList) {
       try {
@@ -311,6 +377,20 @@ router.post('/bulk', authenticate, requireRole(1, 2, 3), async (req, res) => {
             notes: item.notes
           });
           await attendance.save();
+
+          // Get worker data for salary calculation
+          const worker = await User.findById(item.workerId);
+          if (worker) {
+            // Auto-create pending salary entry
+            const pendingSalary = await createPendingSalaryEntry(attendance, worker, req.user._id);
+            if (pendingSalary) {
+              pendingSalariesCreated.push({
+                workerId: item.workerId,
+                amount: pendingSalary.amount
+              });
+            }
+          }
+
           results.push(attendance);
         }
       } catch (err) {
@@ -321,6 +401,8 @@ router.post('/bulk', authenticate, requireRole(1, 2, 3), async (req, res) => {
     res.json({
       success: results.length,
       failed: errors.length,
+      pendingSalariesCreated: pendingSalariesCreated.length,
+      pendingSalaries: pendingSalariesCreated,
       errors
     });
   } catch (error) {

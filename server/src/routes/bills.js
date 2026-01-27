@@ -1,7 +1,9 @@
 import express from 'express';
-import { Bill, Site } from '../models/index.js';
+import { Bill, Site, Investment, FundAllocation } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
+import mongoose from 'mongoose';
+import { validateFundAvailability } from './funds.js';
 
 const router = express.Router();
 
@@ -131,10 +133,18 @@ router.post('/', authenticate, async (req, res) => {
       description,
       billType,
       fundAllocationId,
+      linkedInvestment,
       paymentMethod,
       paymentReference,
       gstRate
     } = req.body;
+
+    // Either fund allocation or investment is required
+    if (!fundAllocationId && !linkedInvestment) {
+      return res.status(400).json({
+        message: 'Either fund allocation or investment is required for all bills.'
+      });
+    }
 
     // Verify site access
     if (siteId) {
@@ -149,11 +159,47 @@ router.post('/', authenticate, async (req, res) => {
 
     const totalAmount = parseFloat(baseAmount) + parseFloat(gstAmount || 0);
 
+    // Validate fund allocation if provided
+    if (fundAllocationId) {
+      const fundAllocation = await FundAllocation.findById(fundAllocationId);
+      if (!fundAllocation) {
+        return res.status(404).json({ message: 'Fund allocation not found' });
+      }
+
+      if (fundAllocation.status !== 'disbursed') {
+        return res.status(400).json({
+          message: `Fund allocation must be disbursed before use (current status: ${fundAllocation.status})`
+        });
+      }
+
+      // Validate sufficient funds available
+      const fundCheck = await validateFundAvailability(fundAllocationId, totalAmount);
+      if (!fundCheck.available) {
+        return res.status(400).json({
+          message: fundCheck.message,
+          available: fundCheck.balance,
+          requested: totalAmount
+        });
+      }
+    }
+
+    // Validate investment if provided
+    if (linkedInvestment) {
+      const investment = await Investment.findById(linkedInvestment);
+      if (!investment) {
+        return res.status(404).json({ message: 'Investment not found' });
+      }
+      if (investment.organization.toString() !== req.user.organization.toString()) {
+        return res.status(403).json({ message: 'Investment not in your organization' });
+      }
+    }
+
     const bill = new Bill({
       organization: req.user.organization,
       site: siteId || null,
       createdBy: req.user._id,
       fundAllocation: fundAllocationId || null,
+      linkedInvestment: linkedInvestment || null,
       vendorName,
       vendorGstNumber,
       invoiceNumber,
@@ -171,7 +217,7 @@ router.post('/', authenticate, async (req, res) => {
     await bill.save();
     await bill.populate('site', 'name');
     await bill.populate('createdBy', 'name email');
-    if (fundAllocationId) await bill.populate('fundAllocation');
+    await bill.populate('fundAllocation');
 
     res.status(201).json(bill);
   } catch (error) {
@@ -229,6 +275,7 @@ router.put('/:id', authenticate, async (req, res) => {
       gstAmount,
       description,
       billType,
+      linkedInvestment,
       paymentMethod,
       paymentReference,
       gstRate
@@ -248,6 +295,7 @@ router.put('/:id', authenticate, async (req, res) => {
     }
     if (description !== undefined) bill.description = description;
     if (billType) bill.billType = billType;
+    if (linkedInvestment !== undefined) bill.linkedInvestment = linkedInvestment || null;
     if (paymentMethod !== undefined) bill.paymentMethod = paymentMethod;
     if (paymentReference !== undefined) bill.paymentReference = paymentReference;
     if (gstRate !== undefined) bill.gstRate = gstRate;
@@ -264,37 +312,77 @@ router.put('/:id', authenticate, async (req, res) => {
 
 // Update bill status (credit/pay)
 router.put('/:id/status', authenticate, requireRole(1), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { status } = req.body;
 
     if (!['pending', 'credited', 'paid', 'rejected'].includes(status)) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'Invalid status' });
     }
 
-    const bill = await Bill.findById(req.params.id);
+    const bill = await Bill.findById(req.params.id).session(session);
 
     if (!bill) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'Bill not found' });
     }
 
     // Check organization access
     if (bill.organization.toString() !== req.user.organization?.toString()) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    const oldStatus = bill.status;
     bill.status = status;
+
     if (status === 'credited') {
       bill.creditedDate = new Date();
+
+      // Auto-create investment when bill is credited (if not already created)
+      if (oldStatus !== 'credited' && !bill.linkedInvestment) {
+        try {
+          const investment = await Investment.create([{
+            organization: bill.organization,
+            partner: bill.createdBy, // Bill creator or could use organization owner
+            amount: bill.totalAmount,
+            description: `Auto-generated from GST bill #${bill.invoiceNumber || 'N/A'} - ${bill.vendorName}`,
+            investmentDate: bill.creditedDate,
+            referenceNumber: bill.invoiceNumber,
+            paymentMode: 'bank_transfer',
+            sourceType: 'bill',
+            sourceBill: bill._id,
+            autoGenerated: true
+          }], { session });
+
+          bill.linkedInvestment = investment[0]._id;
+        } catch (investmentError) {
+          // Log error but don't fail the bill status change
+          console.error('Failed to create auto-investment:', investmentError);
+        }
+      }
     } else if (status === 'paid') {
       bill.paidDate = new Date();
     }
 
-    await bill.save();
+    await bill.save({ session });
+    await session.commitTransaction();
+    session.endSession();
+
     await bill.populate('site', 'name');
     await bill.populate('createdBy', 'name email');
+    await bill.populate('linkedInvestment');
 
     res.json(bill);
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ message: error.message });
   }
 });

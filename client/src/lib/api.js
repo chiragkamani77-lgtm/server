@@ -192,7 +192,9 @@ export const ledgerApi = {
   create: (data) => api.post('/ledger', data),
   update: (id, data) => api.put(`/ledger/${id}`, data),
   delete: (id) => api.delete(`/ledger/${id}`),
-  getBalance: (workerId) => api.get(`/ledger/balance/${workerId}`)
+  getBalance: (workerId) => api.get(`/ledger/balance/${workerId}`),
+  getPendingSalary: (workerId) => api.get(`/ledger/pending-salary/${workerId}`),
+  paySalary: (workerId, data) => api.post(`/ledger/pay-salary/${workerId}`, data)
 }
 
 // Contracts API

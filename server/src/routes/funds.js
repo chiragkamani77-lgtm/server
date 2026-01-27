@@ -4,6 +4,79 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Utility function to validate fund availability
+async function validateFundAvailability(fundAllocationId, requestedAmount) {
+  try {
+    // Get fund allocation
+    const allocation = await FundAllocation.findById(fundAllocationId);
+
+    if (!allocation) {
+      return {
+        available: false,
+        balance: 0,
+        message: 'Fund allocation not found'
+      };
+    }
+
+    // Check if allocation is disbursed
+    if (allocation.status !== 'disbursed') {
+      return {
+        available: false,
+        balance: 0,
+        message: `Fund allocation must be disbursed (current status: ${allocation.status})`
+      };
+    }
+
+    // Calculate current utilization
+    // Get expenses linked to this fund allocation
+    const expenses = await Expense.find({ fundAllocation: allocation._id });
+    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+
+    // Get bills linked to this fund allocation
+    const bills = await Bill.find({ fundAllocation: allocation._id });
+    const totalBills = bills.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+
+    // Get worker ledger entries linked to this fund allocation
+    const ledgerEntries = await WorkerLedger.find({ fundAllocation: allocation._id });
+    const ledgerCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((sum, e) => sum + e.amount, 0);
+    const ledgerDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((sum, e) => sum + e.amount, 0);
+
+    // Get sub-allocations (funds passed down to others)
+    const subAllocations = await FundAllocation.find({
+      organization: allocation.organization,
+      fromUser: allocation.toUser,
+      status: 'disbursed'
+    });
+    const totalSubAllocated = subAllocations.reduce((sum, a) => sum + a.amount, 0);
+
+    // Calculate remaining balance
+    const totalUtilized = totalExpenses + totalBills + (ledgerCredits - ledgerDebits) + totalSubAllocated;
+    const remainingBalance = allocation.amount - totalUtilized;
+
+    // Check if requested amount is available
+    const available = requestedAmount <= remainingBalance;
+
+    return {
+      available,
+      balance: remainingBalance,
+      allocated: allocation.amount,
+      utilized: totalUtilized,
+      message: available
+        ? 'Sufficient funds available'
+        : `Insufficient funds. Available: ${remainingBalance.toFixed(2)}, Requested: ${requestedAmount.toFixed(2)}`
+    };
+  } catch (error) {
+    return {
+      available: false,
+      balance: 0,
+      message: `Error validating funds: ${error.message}`
+    };
+  }
+}
+
+// Export for use in other routes
+export { validateFundAvailability };
+
 // Get fund allocations (filtered by user role)
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -355,7 +428,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       purpose,
       description,
       referenceNumber,
-      status: req.user.role === 1 ? 'approved' : 'pending' // Auto-approve if from Developer
+      status: req.user.role === 1 ? 'disbursed' : 'pending' // Auto-disburse if from Developer
     });
 
     await allocation.save();

@@ -40,8 +40,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
-import { formatDate } from '@/lib/utils'
-import { Plus, Users, Calendar, Clock, CheckCircle, XCircle, Filter, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+import { formatDate, formatCurrency } from '@/lib/utils'
+import { Plus, Users, Calendar, Clock, CheckCircle, XCircle, Filter, ChevronLeft, ChevronRight, Trash2, Edit } from 'lucide-react'
 
 const STATUS_COLORS = {
   present: 'bg-green-100 text-green-800',
@@ -58,6 +58,7 @@ export default function Attendance() {
   const [sites, setSites] = useState([])
   const [workers, setWorkers] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
+  const [editingId, setEditingId] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -148,7 +149,7 @@ export default function Attendance() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      await attendanceApi.create({
+      const attendanceData = {
         workerId: form.workerId,
         siteId: form.siteId || null,
         date: form.date,
@@ -156,18 +157,66 @@ export default function Attendance() {
         hoursWorked: form.status === 'present' ? parseFloat(form.hoursWorked) : form.status === 'half_day' ? 4 : 0,
         overtime: parseFloat(form.overtime) || 0,
         notes: form.notes,
-      })
-      toast({ title: 'Attendance recorded' })
+      }
+
+      if (editingId) {
+        const response = await attendanceApi.update(editingId, attendanceData)
+
+        const workerName = selectedWorker?.name || 'Worker'
+        let description = `Attendance updated for ${workerName}`
+
+        if (response.data?.pendingSalary && (form.status === 'present' || form.status === 'half_day')) {
+          const pendingAmount = formatCurrency(response.data.pendingSalary.totalPending || 0)
+          const todayEarnings = formatCurrency(totalEarnings || 0)
+          description = `${description}. Today's earnings: ${todayEarnings}. Total pending salary: ${pendingAmount}`
+        }
+
+        toast({
+          title: 'Attendance updated successfully',
+          description: description
+        })
+      } else {
+        const response = await attendanceApi.create(attendanceData)
+
+        const workerName = selectedWorker?.name || 'Worker'
+        let description = `Attendance recorded for ${workerName}`
+
+        if (response.data?.pendingSalary && (form.status === 'present' || form.status === 'half_day')) {
+          const pendingAmount = formatCurrency(response.data.pendingSalary.totalPending || 0)
+          const todayEarnings = formatCurrency(totalEarnings || 0)
+          description = `${description}. Today's earnings: ${todayEarnings}. Total pending salary: ${pendingAmount}`
+        }
+
+        toast({
+          title: 'Attendance recorded successfully',
+          description: description
+        })
+      }
+
       setIsAddOpen(false)
       resetForm()
       fetchRecords()
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.message || 'Failed to record attendance',
+        description: error.response?.data?.message || 'Failed to save attendance',
         variant: 'destructive',
       })
     }
+  }
+
+  const handleEdit = (record) => {
+    setForm({
+      workerId: record.worker?._id || '',
+      siteId: record.site?._id || '',
+      date: record.date.split('T')[0],
+      status: record.status,
+      hoursWorked: record.hoursWorked?.toString() || '8',
+      overtime: record.overtime?.toString() || '0',
+      notes: record.notes || '',
+    })
+    setEditingId(record._id)
+    setIsAddOpen(true)
   }
 
   const handleBulkSubmit = async (e) => {
@@ -191,12 +240,22 @@ export default function Attendance() {
         return
       }
 
-      await attendanceApi.bulkCreate({
+      const response = await attendanceApi.bulkCreate({
         siteId: bulkForm.siteId || null,
         date: bulkForm.date,
         attendanceList
       })
-      toast({ title: `Attendance recorded for ${attendanceList.length} workers` })
+
+      let description = `Attendance recorded for ${attendanceList.length} workers`
+      if (response.data?.summary) {
+        const totalPending = formatCurrency(response.data.summary.totalPendingSalary || 0)
+        description = `${description}. Total pending salary across all workers: ${totalPending}`
+      }
+
+      toast({
+        title: 'Bulk attendance recorded',
+        description: description
+      })
       setIsBulkOpen(false)
       resetBulkForm()
       fetchRecords()
@@ -234,6 +293,7 @@ export default function Attendance() {
       overtime: '0',
       notes: '',
     })
+    setEditingId(null)
   }
 
   const resetBulkForm = () => {
@@ -500,13 +560,24 @@ export default function Attendance() {
                   <TableCell className="max-w-[150px] truncate">{record.notes || '-'}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{record.markedBy?.name}</TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setDeleteId(record._id)}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEdit(record)}
+                        title="Edit attendance"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeleteId(record._id)}
+                        title="Delete attendance"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -539,12 +610,17 @@ export default function Attendance() {
       )}
 
       {/* Add Single Record Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+      <Dialog open={isAddOpen} onOpenChange={(open) => {
+        setIsAddOpen(open)
+        if (!open) resetForm()
+      }}>
         <DialogContent>
           <form onSubmit={handleSubmit}>
             <DialogHeader>
-              <DialogTitle>Record Attendance</DialogTitle>
-              <DialogDescription>Mark attendance for a worker</DialogDescription>
+              <DialogTitle>{editingId ? 'Edit' : 'Record'} Attendance</DialogTitle>
+              <DialogDescription>
+                {editingId ? 'Update attendance record' : 'Mark attendance for a worker'}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -680,7 +756,7 @@ export default function Attendance() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="submit">Record Attendance</Button>
+              <Button type="submit">{editingId ? 'Update' : 'Record'} Attendance</Button>
             </DialogFooter>
           </form>
         </DialogContent>

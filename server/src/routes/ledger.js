@@ -1,6 +1,8 @@
 import express from 'express';
-import { WorkerLedger, User, Site, Contract } from '../models/index.js';
+import { WorkerLedger, User, Site, Contract, FundAllocation } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { validateFundAvailability } from './funds.js';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 
@@ -162,6 +164,101 @@ router.get('/balance/:workerId', authenticate, async (req, res) => {
   }
 });
 
+// Get pending salary summary for a worker
+router.get('/pending-salary/:workerId', authenticate, async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const { workerId } = req.params;
+
+    // Verify access
+    if (req.user.role === 4 && req.user._id.toString() !== workerId) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (req.user.role === 2 || req.user.role === 3) {
+      const childIds = await req.user.getChildIds();
+      if (!childIds.some(id => id.toString() === workerId)) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+    }
+
+    const worker = await User.findById(workerId);
+    if (!worker) {
+      return res.status(404).json({ message: 'Worker not found' });
+    }
+
+    // Get pending salary entries
+    const pendingEntries = await WorkerLedger.find({
+      organization: req.user.organization,
+      worker: workerId,
+      category: 'pending_salary',
+      status: 'pending'
+    })
+      .populate('site', 'name')
+      .populate('linkedAttendance')
+      .sort({ transactionDate: -1 });
+
+    const totalPending = pendingEntries.reduce((sum, e) => sum + e.amount, 0);
+
+    // Get unpaid advances (advances without corresponding deduction entries)
+    const advances = await WorkerLedger.find({
+      organization: req.user.organization,
+      worker: workerId,
+      category: 'advance',
+      type: 'credit'
+    });
+
+    // Check which advances have been deducted
+    const unpaidAdvances = [];
+    for (const advance of advances) {
+      const deduction = await WorkerLedger.findOne({
+        linkedAdvance: advance._id,
+        category: 'deduction'
+      });
+
+      if (!deduction) {
+        unpaidAdvances.push(advance);
+      }
+    }
+
+    const totalAdvances = unpaidAdvances.reduce((sum, a) => sum + a.amount, 0);
+    const netPayable = totalPending - totalAdvances;
+
+    res.json({
+      worker: {
+        _id: worker._id,
+        name: worker.name,
+        email: worker.email,
+        dailyRate: worker.dailyRate
+      },
+      totalPending,
+      totalAdvances,
+      netPayable,
+      pendingEntries: pendingEntries.map(e => ({
+        _id: e._id,
+        amount: e.amount,
+        description: e.description,
+        transactionDate: e.transactionDate,
+        site: e.site,
+        periodStart: e.periodStart,
+        periodEnd: e.periodEnd
+      })),
+      advanceEntries: unpaidAdvances.map(a => ({
+        _id: a._id,
+        amount: a.amount,
+        description: a.description,
+        transactionDate: a.transactionDate,
+        referenceNumber: a.referenceNumber
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Create ledger entry (Developer, Engineer, Supervisor)
 router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
@@ -316,6 +413,227 @@ router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
 
     res.json({ message: 'Ledger entry deleted successfully' });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Pay salary with automatic advance deduction
+router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!req.user.organization) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const {
+      workerId,
+      siteId,
+      periodStart,
+      periodEnd,
+      fundAllocationId,
+      paymentMode,
+      referenceNumber,
+      notes
+    } = req.body;
+
+    // Validate required fields
+    if (!workerId || !fundAllocationId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Worker ID and Fund Allocation ID are required' });
+    }
+
+    // Verify worker
+    const worker = await User.findById(workerId).session(session);
+    if (!worker) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Worker not found' });
+    }
+
+    // Verify access
+    if (req.user.role === 2 || req.user.role === 3) {
+      const childIds = await req.user.getChildIds();
+      if (!childIds.some(id => id.toString() === workerId)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(403).json({ message: 'Can only pay salary for your team members' });
+      }
+    }
+
+    // Verify fund allocation
+    const fundAllocation = await FundAllocation.findById(fundAllocationId).session(session);
+    if (!fundAllocation) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Fund allocation not found' });
+    }
+
+    if (fundAllocation.status !== 'disbursed') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: `Fund allocation must be disbursed (current status: ${fundAllocation.status})`
+      });
+    }
+
+    // Build filter for pending salary entries
+    const pendingFilter = {
+      organization: req.user.organization,
+      worker: workerId,
+      category: 'pending_salary',
+      status: 'pending'
+    };
+
+    if (siteId) pendingFilter.site = siteId;
+    if (periodStart || periodEnd) {
+      pendingFilter.transactionDate = {};
+      if (periodStart) pendingFilter.transactionDate.$gte = new Date(periodStart);
+      if (periodEnd) pendingFilter.transactionDate.$lte = new Date(periodEnd);
+    }
+
+    // Fetch pending salary entries
+    const pendingEntries = await WorkerLedger.find(pendingFilter).session(session);
+
+    if (pendingEntries.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'No pending salary entries found for the specified period' });
+    }
+
+    const totalPendingSalary = pendingEntries.reduce((sum, e) => sum + e.amount, 0);
+
+    // Fetch unpaid advances
+    const advances = await WorkerLedger.find({
+      organization: req.user.organization,
+      worker: workerId,
+      category: 'advance',
+      type: 'credit'
+    }).session(session);
+
+    const unpaidAdvances = [];
+    for (const advance of advances) {
+      const deduction = await WorkerLedger.findOne({
+        linkedAdvance: advance._id,
+        category: 'deduction'
+      }).session(session);
+
+      if (!deduction) {
+        unpaidAdvances.push(advance);
+      }
+    }
+
+    const totalAdvances = unpaidAdvances.reduce((sum, a) => sum + a.amount, 0);
+    const netPayable = totalPendingSalary - totalAdvances;
+
+    // Validate sufficient funds
+    const fundCheck = await validateFundAvailability(fundAllocationId, Math.max(netPayable, 0));
+    if (!fundCheck.available && netPayable > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: fundCheck.message,
+        available: fundCheck.balance,
+        requested: netPayable
+      });
+    }
+
+    // Create payment transaction entries
+    const paymentEntries = [];
+    const deductionEntries = [];
+    const now = new Date();
+
+    // Mark pending salaries as paid
+    for (const entry of pendingEntries) {
+      entry.status = 'paid';
+      entry.fundAllocation = fundAllocationId;
+      entry.paidDate = now;
+      await entry.save({ session });
+    }
+
+    // Create deduction entries for advances
+    for (const advance of unpaidAdvances) {
+      const deduction = new WorkerLedger({
+        organization: req.user.organization,
+        worker: workerId,
+        site: siteId || null,
+        createdBy: req.user._id,
+        type: 'debit',
+        category: 'deduction',
+        amount: advance.amount,
+        description: `Advance deduction from salary${periodStart && periodEnd ? ` (${new Date(periodStart).toISOString().split('T')[0]} to ${new Date(periodEnd).toISOString().split('T')[0]})` : ''}`,
+        transactionDate: now,
+        linkedAdvance: advance._id,
+        status: 'paid',
+        paidDate: now
+      });
+
+      await deduction.save({ session });
+      deductionEntries.push(deduction);
+    }
+
+    // Create final payment entry if net payable is positive
+    if (netPayable > 0) {
+      const payment = new WorkerLedger({
+        organization: req.user.organization,
+        worker: workerId,
+        site: siteId || null,
+        createdBy: req.user._id,
+        fundAllocation: fundAllocationId,
+        type: 'credit',
+        category: 'salary',
+        amount: netPayable,
+        description: `Salary payment${periodStart && periodEnd ? ` for ${new Date(periodStart).toISOString().split('T')[0]} to ${new Date(periodEnd).toISOString().split('T')[0]}` : ''}${notes ? ` - ${notes}` : ''}`,
+        transactionDate: now,
+        referenceNumber,
+        paymentMode: paymentMode || 'cash',
+        status: 'paid',
+        paidDate: now,
+        periodStart: periodStart ? new Date(periodStart) : null,
+        periodEnd: periodEnd ? new Date(periodEnd) : null
+      });
+
+      await payment.save({ session });
+      paymentEntries.push(payment);
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      success: true,
+      message: 'Salary paid successfully',
+      summary: {
+        grossSalary: totalPendingSalary,
+        advancesDeducted: totalAdvances,
+        netPaid: netPayable,
+        pendingEntriesProcessed: pendingEntries.length,
+        advancesDeductedCount: unpaidAdvances.length
+      },
+      pendingEntries: pendingEntries.map(e => ({
+        _id: e._id,
+        amount: e.amount,
+        description: e.description
+      })),
+      deductionEntries: deductionEntries.map(d => ({
+        _id: d._id,
+        amount: d.amount,
+        description: d.description
+      })),
+      paymentEntries: paymentEntries.map(p => ({
+        _id: p._id,
+        amount: p.amount,
+        description: p.description,
+        referenceNumber: p.referenceNumber
+      }))
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ message: error.message });
   }
 });

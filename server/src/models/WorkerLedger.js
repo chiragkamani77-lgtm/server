@@ -40,7 +40,7 @@ const workerLedgerSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['salary', 'advance', 'bonus', 'deduction', 'reimbursement', 'contract_payment', 'other'],
+    enum: ['salary', 'advance', 'bonus', 'deduction', 'reimbursement', 'contract_payment', 'pending_salary', 'other'],
     required: true
   },
   description: {
@@ -60,6 +60,28 @@ const workerLedgerSchema = new mongoose.Schema({
     type: String,
     enum: ['cash', 'bank_transfer', 'cheque', 'upi', 'other'],
     default: 'cash'
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'paid'],
+    default: 'paid'
+  },
+  linkedAttendance: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Attendance'
+  },
+  periodStart: {
+    type: Date
+  },
+  periodEnd: {
+    type: Date
+  },
+  paidDate: {
+    type: Date
+  },
+  linkedAdvance: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'WorkerLedger'
   }
 }, {
   timestamps: true

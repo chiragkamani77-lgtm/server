@@ -1,7 +1,8 @@
 import express from 'express';
-import { Expense, Site } from '../models/index.js';
+import { Expense, Site, FundAllocation } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
+import { validateFundAvailability } from './funds.js';
 
 const router = express.Router();
 
@@ -190,6 +191,13 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
+    // Fund allocation is now required
+    if (!fundAllocationId) {
+      return res.status(400).json({
+        message: 'Fund allocation is required for all expenses. Please select a fund allocation.'
+      });
+    }
+
     // Check site access
     const site = await Site.findById(siteId);
     if (!site) {
@@ -198,6 +206,28 @@ router.post('/', authenticate, async (req, res) => {
 
     if (req.user.role !== 1 && !site.hasAccess(req.user._id)) {
       return res.status(403).json({ message: 'Access denied to this site' });
+    }
+
+    // Validate fund allocation exists and is disbursed
+    const fundAllocation = await FundAllocation.findById(fundAllocationId);
+    if (!fundAllocation) {
+      return res.status(404).json({ message: 'Fund allocation not found' });
+    }
+
+    if (fundAllocation.status !== 'disbursed') {
+      return res.status(400).json({
+        message: `Fund allocation must be disbursed before use (current status: ${fundAllocation.status})`
+      });
+    }
+
+    // Validate sufficient funds available
+    const fundCheck = await validateFundAvailability(fundAllocationId, amount);
+    if (!fundCheck.available) {
+      return res.status(400).json({
+        message: fundCheck.message,
+        available: fundCheck.balance,
+        requested: amount
+      });
     }
 
     // For developers (role 1): expense is auto-approved
@@ -209,7 +239,7 @@ router.post('/', authenticate, async (req, res) => {
       site: siteId,
       category: categoryId,
       user: req.user._id,
-      fundAllocation: fundAllocationId || null,
+      fundAllocation: fundAllocationId,
       amount: isDeveloper ? amount : 0, // Supervisor submits 0, developer fills actual amount
       requestedAmount: amount, // Store the requested amount
       approvedAmount: isDeveloper ? amount : null, // Auto-approve for developer
@@ -225,7 +255,7 @@ router.post('/', authenticate, async (req, res) => {
     await expense.populate('site', 'name');
     await expense.populate('category', 'name');
     await expense.populate('user', 'name email');
-    if (fundAllocationId) await expense.populate('fundAllocation');
+    await expense.populate('fundAllocation');
 
     res.status(201).json(expense);
   } catch (error) {
