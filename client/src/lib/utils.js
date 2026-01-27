@@ -25,13 +25,15 @@ export function formatDate(date) {
 export const ROLE_NAMES = {
   1: 'Developer',
   2: 'Engineer',
-  3: 'Supervisor'
+  3: 'Supervisor',
+  4: 'Worker'
 }
 
 export const ROLE_COLORS = {
   1: 'bg-purple-100 text-purple-800',
   2: 'bg-blue-100 text-blue-800',
-  3: 'bg-green-100 text-green-800'
+  3: 'bg-orange-100 text-orange-800',
+  4: 'bg-green-100 text-green-800'
 }
 
 export const STATUS_COLORS = {

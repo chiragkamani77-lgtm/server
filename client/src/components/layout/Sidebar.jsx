@@ -57,13 +57,13 @@ const navItems = [
     title: 'Attendance',
     href: '/attendance',
     icon: Calendar,
-    roles: [1, 2],
+    roles: [1, 2, 3],  // Supervisor marks attendance for workers
   },
   {
     title: 'Worker Ledger',
     href: '/ledger',
     icon: Wallet,
-    roles: [1, 2, 3],
+    roles: [1, 2, 3, 4],  // Worker can view their own salary/advance
   },
   {
     title: 'Users',

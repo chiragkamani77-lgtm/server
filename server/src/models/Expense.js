@@ -45,6 +45,42 @@ const expenseSchema = new mongoose.Schema({
     type: Date,
     required: true,
     default: Date.now
+  },
+  // Approval workflow fields
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'paid', 'rejected'],
+    default: 'pending'
+  },
+  requestedAmount: {
+    type: Number,
+    min: 0
+  },
+  approvedAmount: {
+    type: Number,
+    min: 0
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvalDate: {
+    type: Date
+  },
+  approvalNotes: {
+    type: String,
+    trim: true
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'bank_transfer', 'cheque', 'upi', 'neft', 'rtgs', 'other']
+  },
+  paymentReference: {
+    type: String,
+    trim: true
+  },
+  paidDate: {
+    type: Date
   }
 }, {
   timestamps: true

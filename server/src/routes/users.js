@@ -29,29 +29,42 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Create user (creates as child of current user)
-router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
+router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
+    const { email, password, name, role, dailyRate } = req.body;
 
-    // Determine allowed role for new user
+    // Determine allowed role for new user based on creator's role
     let assignedRole = role;
-    if (req.user.role === 2) {
-      // Supervisor can only create workers
-      assignedRole = 3;
+    if (req.user.role === 3) {
+      // Supervisor can only create workers (role 4)
+      assignedRole = 4;
+    } else if (req.user.role === 2) {
+      // Engineer can create supervisors (3) or workers (4)
+      if (role !== 3 && role !== 4) {
+        assignedRole = 4;
+      }
     } else if (req.user.role === 1) {
-      // Developer can create supervisors or workers
-      if (role !== 2 && role !== 3) {
+      // Developer can create engineers (2), supervisors (3), or workers (4)
+      if (role !== 2 && role !== 3 && role !== 4) {
         assignedRole = 2;
       }
     }
 
-    const user = new User({
+    const userData = {
       email,
       password,
       name,
       role: assignedRole,
-      parent: req.user._id
-    });
+      parent: req.user._id,
+      organization: req.user.organization
+    };
+
+    // Add dailyRate for supervisors and workers
+    if (dailyRate !== undefined && (assignedRole === 3 || assignedRole === 4)) {
+      userData.dailyRate = dailyRate;
+    }
+
+    const user = new User(userData);
 
     await user.save();
 
@@ -89,12 +102,16 @@ router.put('/:userId', authenticate, canManageUser, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const { name, email, password, isActive } = req.body;
+    const { name, email, password, isActive, dailyRate } = req.body;
 
     if (name) user.name = name;
     if (email) user.email = email;
     if (password) user.password = password;
     if (isActive !== undefined) user.isActive = isActive;
+    // Allow setting dailyRate for supervisors and workers
+    if (dailyRate !== undefined && (user.role === 3 || user.role === 4)) {
+      user.dailyRate = dailyRate;
+    }
 
     await user.save();
 
@@ -108,7 +125,7 @@ router.put('/:userId', authenticate, canManageUser, async (req, res) => {
 });
 
 // Delete user
-router.delete('/:userId', authenticate, requireRole(1, 2), canManageUser, async (req, res) => {
+router.delete('/:userId', authenticate, requireRole(1, 2, 3), canManageUser, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
 

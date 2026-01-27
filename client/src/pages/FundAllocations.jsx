@@ -472,7 +472,7 @@ export default function FundAllocations() {
                           </Button>
                         </>
                       )}
-                      {allocation.toUser?._id === user._id && allocation.status === 'approved' && (
+                      {/* {allocation.toUser?._id === user._id && allocation.status === 'approved' && ( */}
                         <Button
                           variant="outline"
                           size="sm"
@@ -480,7 +480,7 @@ export default function FundAllocations() {
                         >
                           Mark Received
                         </Button>
-                      )}
+                      {/* )} */}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -535,7 +535,7 @@ export default function FundAllocations() {
                   <SelectContent>
                     {users.map((u) => (
                       <SelectItem key={u._id} value={u._id}>
-                        {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : 'Supervisor'})
+                        {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : u.role === 3 ? 'Supervisor' : 'Worker'})
                       </SelectItem>
                     ))}
                   </SelectContent>

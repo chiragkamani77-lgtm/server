@@ -28,6 +28,31 @@ const getVisibilityFilter = async (user, siteId) => {
   return filter;
 };
 
+// Helper to mask amounts for supervisor viewing child expenses
+const maskChildAmounts = (expense, currentUser) => {
+  // Developer sees everything
+  if (currentUser.role === 1) {
+    return expense;
+  }
+
+  // If it's the user's own expense, show full details
+  if (expense.user?._id?.toString() === currentUser._id.toString()) {
+    return expense;
+  }
+
+  // For supervisor viewing child expenses - hide amounts
+  if (currentUser.role === 2) {
+    const masked = expense.toObject ? expense.toObject() : { ...expense };
+    masked.amount = null;
+    masked.requestedAmount = null;
+    masked.approvedAmount = null;
+    masked.amountHidden = true;
+    return masked;
+  }
+
+  return expense;
+};
+
 // Get expenses (filtered by visibility)
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -53,14 +78,18 @@ router.get('/', authenticate, async (req, res) => {
       .populate('site', 'name')
       .populate('category', 'name')
       .populate('user', 'name email')
+      .populate('approvedBy', 'name')
       .sort({ expenseDate: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
     const total = await Expense.countDocuments(filter);
 
+    // Mask child amounts for supervisors
+    const maskedExpenses = expenses.map(exp => maskChildAmounts(exp, req.user));
+
     res.json({
-      expenses,
+      expenses: maskedExpenses,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -171,13 +200,22 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Access denied to this site' });
     }
 
+    // For developers (role 1): expense is auto-approved
+    // For supervisors/workers: expense goes to pending status
+    const isDeveloper = req.user.role === 1;
+
     const expense = new Expense({
       organization: req.user.organization,
       site: siteId,
       category: categoryId,
       user: req.user._id,
       fundAllocation: fundAllocationId || null,
-      amount,
+      amount: isDeveloper ? amount : 0, // Supervisor submits 0, developer fills actual amount
+      requestedAmount: amount, // Store the requested amount
+      approvedAmount: isDeveloper ? amount : null, // Auto-approve for developer
+      status: isDeveloper ? 'approved' : 'pending', // Developer expenses auto-approved
+      approvedBy: isDeveloper ? req.user._id : null,
+      approvalDate: isDeveloper ? new Date() : null,
       description,
       vendorName,
       expenseDate: expenseDate || new Date()
@@ -249,24 +287,90 @@ router.put('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Expense not found' });
     }
 
-    // Check if user can manage this expense
-    const canManage = await canManageExpense(req.user, expense);
-    if (!canManage) {
-      return res.status(403).json({ message: 'Can only edit your own or subordinates\' expenses' });
+    const isDeveloper = req.user.role === 1;
+    const isOwner = expense.user.toString() === req.user._id.toString();
+
+    // Developer can edit any expense
+    // Non-developers can only edit their own expenses and only certain fields
+    if (!isDeveloper && !isOwner) {
+      return res.status(403).json({ message: 'Only developers can edit others\' expenses' });
     }
 
-    const { categoryId, amount, description, vendorName, expenseDate } = req.body;
+    const { categoryId, amount, description, vendorName, expenseDate, requestedAmount } = req.body;
 
-    if (categoryId) expense.category = categoryId;
-    if (amount !== undefined) expense.amount = amount;
-    if (description !== undefined) expense.description = description;
-    if (vendorName !== undefined) expense.vendorName = vendorName;
-    if (expenseDate) expense.expenseDate = expenseDate;
+    // Non-developers can only edit description, vendorName, expenseDate, requestedAmount
+    if (!isDeveloper) {
+      if (description !== undefined) expense.description = description;
+      if (vendorName !== undefined) expense.vendorName = vendorName;
+      if (expenseDate) expense.expenseDate = expenseDate;
+      if (requestedAmount !== undefined) expense.requestedAmount = requestedAmount;
+    } else {
+      // Developer can edit everything
+      if (categoryId) expense.category = categoryId;
+      if (amount !== undefined) expense.amount = amount;
+      if (description !== undefined) expense.description = description;
+      if (vendorName !== undefined) expense.vendorName = vendorName;
+      if (expenseDate) expense.expenseDate = expenseDate;
+      if (requestedAmount !== undefined) expense.requestedAmount = requestedAmount;
+    }
 
     await expense.save();
     await expense.populate('site', 'name');
     await expense.populate('category', 'name');
     await expense.populate('user', 'name email');
+    await expense.populate('approvedBy', 'name');
+
+    res.json(expense);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Approve/Pay expense (Developer only)
+router.put('/:id/approve', authenticate, async (req, res) => {
+  try {
+    // Only developers can approve
+    if (req.user.role !== 1) {
+      return res.status(403).json({ message: 'Only developers can approve expenses' });
+    }
+
+    const expense = await Expense.findById(req.params.id);
+
+    if (!expense) {
+      return res.status(404).json({ message: 'Expense not found' });
+    }
+
+    const { status, approvedAmount, approvalNotes, paymentMethod, paymentReference } = req.body;
+
+    if (!['approved', 'paid', 'rejected'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+
+    expense.status = status;
+
+    if (status === 'approved' || status === 'paid') {
+      if (approvedAmount === undefined || approvedAmount === null) {
+        return res.status(400).json({ message: 'Approved amount is required' });
+      }
+      expense.approvedAmount = approvedAmount;
+      expense.amount = approvedAmount; // Set actual amount
+      expense.approvedBy = req.user._id;
+      expense.approvalDate = new Date();
+    }
+
+    if (status === 'paid') {
+      expense.paidDate = new Date();
+      if (paymentMethod) expense.paymentMethod = paymentMethod;
+      if (paymentReference) expense.paymentReference = paymentReference;
+    }
+
+    if (approvalNotes !== undefined) expense.approvalNotes = approvalNotes;
+
+    await expense.save();
+    await expense.populate('site', 'name');
+    await expense.populate('category', 'name');
+    await expense.populate('user', 'name email');
+    await expense.populate('approvedBy', 'name');
 
     res.json(expense);
   } catch (error) {
@@ -283,10 +387,18 @@ router.delete('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Expense not found' });
     }
 
-    // Check if user can manage this expense
-    const canManage = await canManageExpense(req.user, expense);
-    if (!canManage) {
-      return res.status(403).json({ message: 'Can only delete your own or subordinates\' expenses' });
+    const isDeveloper = req.user.role === 1;
+    const isOwner = expense.user.toString() === req.user._id.toString();
+
+    // Developer can delete any expense
+    // Non-developers can only delete their own pending expenses
+    if (!isDeveloper) {
+      if (!isOwner) {
+        return res.status(403).json({ message: 'Only developers can delete others\' expenses' });
+      }
+      if (expense.status !== 'pending') {
+        return res.status(403).json({ message: 'Can only delete pending expenses' });
+      }
     }
 
     await expense.deleteOne();

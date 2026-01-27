@@ -493,7 +493,7 @@ export default function WorkerLedger() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="credit">Credit (Payment to worker)</SelectItem>
-                      <SelectItem value="debit">Debit (Advance/Due from worker)</SelectItem>
+                      {/* <SelectItem value="debit">Debit (Advance/Due from worker)</SelectItem> */}
                     </SelectContent>
                   </Select>
                 </div>

@@ -75,6 +75,19 @@ const billSchema = new mongoose.Schema({
   },
   receiptPath: {
     type: String
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['cash', 'bank_transfer', 'cheque', 'upi', 'neft', 'rtgs', 'other'],
+  },
+  paymentReference: {
+    type: String,
+    trim: true
+  },
+  gstRate: {
+    type: Number,
+    enum: [0, 5, 12, 18, 28],
+    default: 18
   }
 }, {
   timestamps: true

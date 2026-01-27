@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Receipt, FileText, CreditCard, ChevronLeft, ChevronRight, Trash2, Edit, Check, Filter } from 'lucide-react'
+import { Plus, Receipt, FileText, CreditCard, ChevronLeft, ChevronRight, Trash2, Edit, Check, Filter, Download, Upload, Eye, X } from 'lucide-react'
 
 const BILL_TYPES = [
   { value: 'material', label: 'Material' },
@@ -40,6 +40,24 @@ const BILL_TYPES = [
   { value: 'labor', label: 'Labor' },
   { value: 'equipment', label: 'Equipment' },
   { value: 'utility', label: 'Utility' },
+  { value: 'other', label: 'Other' },
+]
+
+const GST_RATES = [
+  { value: 0, label: '0% (Exempt)' },
+  { value: 5, label: '5%' },
+  { value: 12, label: '12%' },
+  { value: 18, label: '18% (Standard)' },
+  { value: 28, label: '28%' },
+]
+
+const PAYMENT_METHODS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'upi', label: 'UPI' },
+  { value: 'neft', label: 'NEFT' },
+  { value: 'rtgs', label: 'RTGS' },
   { value: 'other', label: 'Other' },
 ]
 
@@ -51,7 +69,7 @@ const STATUS_COLORS = {
 }
 
 export default function Bills() {
-  const { user, isAdmin } = useAuth()
+  const { isAdmin } = useAuth()
   const { toast } = useToast()
 
   const [bills, setBills] = useState([])
@@ -62,6 +80,10 @@ export default function Bills() {
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
+  const [viewBill, setViewBill] = useState(null)
+  const [vendorSuggestions, setVendorSuggestions] = useState([])
+  const [uploadingReceipt, setUploadingReceipt] = useState(null)
+  const [exporting, setExporting] = useState(false)
 
   const [filters, setFilters] = useState({
     siteId: '',
@@ -78,8 +100,11 @@ export default function Bills() {
     billDate: new Date().toISOString().split('T')[0],
     baseAmount: '',
     gstAmount: '',
+    gstRate: 18,
     description: '',
     billType: 'material',
+    paymentMethod: '',
+    paymentReference: '',
   })
 
   useEffect(() => {
@@ -92,12 +117,14 @@ export default function Bills() {
 
   const fetchSites = async () => {
     try {
-      const [sitesRes, fundsRes] = await Promise.all([
+      const [sitesRes, fundsRes, vendorsRes] = await Promise.all([
         sitesApi.getAll(),
-        fundsApi.getAll({ status: 'disbursed' })
+        fundsApi.getAll({ status: 'disbursed' }),
+        billsApi.getVendorSuggestions()
       ])
       setSites(sitesRes.data)
       setFundAllocations(fundsRes.data?.allocations || [])
+      setVendorSuggestions(vendorsRes.data || [])
     } catch (error) {
       console.error('Error fetching data:', error)
     }
@@ -141,8 +168,11 @@ export default function Bills() {
         billDate: form.billDate,
         baseAmount: parseFloat(form.baseAmount),
         gstAmount: parseFloat(form.gstAmount) || 0,
+        gstRate: parseInt(form.gstRate) || 18,
         description: form.description,
         billType: form.billType,
+        paymentMethod: form.paymentMethod || null,
+        paymentReference: form.paymentReference || null,
       }
 
       if (editingId) {
@@ -181,14 +211,18 @@ export default function Bills() {
   const handleEdit = (bill) => {
     setForm({
       siteId: bill.site?._id || '',
+      fundAllocationId: bill.fundAllocation?._id || '',
       vendorName: bill.vendorName,
       vendorGstNumber: bill.vendorGstNumber || '',
       invoiceNumber: bill.invoiceNumber || '',
       billDate: bill.billDate.split('T')[0],
       baseAmount: bill.baseAmount.toString(),
       gstAmount: bill.gstAmount.toString(),
+      gstRate: bill.gstRate || 18,
       description: bill.description || '',
       billType: bill.billType,
+      paymentMethod: bill.paymentMethod || '',
+      paymentReference: bill.paymentReference || '',
     })
     setEditingId(bill._id)
     setIsAddOpen(true)
@@ -219,10 +253,75 @@ export default function Bills() {
       billDate: new Date().toISOString().split('T')[0],
       baseAmount: '',
       gstAmount: '',
+      gstRate: 18,
       description: '',
       billType: 'material',
+      paymentMethod: '',
+      paymentReference: '',
     })
     setEditingId(null)
+  }
+
+  const handleGstRateChange = (rate) => {
+    const baseAmount = parseFloat(form.baseAmount) || 0
+    const gstAmount = (baseAmount * rate) / 100
+    setForm({ ...form, gstRate: rate, gstAmount: gstAmount.toFixed(2) })
+  }
+
+  const handleBaseAmountChange = (value) => {
+    const baseAmount = parseFloat(value) || 0
+    const gstAmount = (baseAmount * form.gstRate) / 100
+    setForm({ ...form, baseAmount: value, gstAmount: gstAmount.toFixed(2) })
+  }
+
+  const handleReceiptUpload = async (billId, file) => {
+    try {
+      setUploadingReceipt(billId)
+      await billsApi.uploadReceipt(billId, file)
+      toast({ title: 'Receipt uploaded successfully' })
+      fetchData()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to upload receipt',
+        variant: 'destructive',
+      })
+    } finally {
+      setUploadingReceipt(null)
+    }
+  }
+
+  const handleExport = async () => {
+    try {
+      setExporting(true)
+      const params = Object.fromEntries(Object.entries(filters).filter(([_, v]) => v))
+      const response = await billsApi.exportCsv(params)
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `bills-export-${new Date().toISOString().split('T')[0]}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast({ title: 'Bills exported successfully' })
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to export bills',
+        variant: 'destructive',
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleVendorSelect = (vendor) => {
+    setForm({
+      ...form,
+      vendorName: vendor.name,
+      vendorGstNumber: vendor.gstNumber || '',
+    })
   }
 
   const clearFilters = () => {
@@ -239,10 +338,16 @@ export default function Bills() {
             Track and manage all bills with GST details
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setIsAddOpen(true); }}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Bill
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            <Download className="h-4 w-4 mr-2" />
+            {exporting ? 'Exporting...' : 'Export CSV'}
+          </Button>
+          <Button onClick={() => { resetForm(); setIsAddOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Bill
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -391,13 +496,14 @@ export default function Bills() {
               <TableHead className="text-right">GST</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Receipt</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8">
+                <TableCell colSpan={11} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -405,7 +511,7 @@ export default function Bills() {
               </TableRow>
             ) : bills.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   No bills found
                 </TableCell>
               </TableRow>
@@ -435,7 +541,45 @@ export default function Bills() {
                     <Badge className={STATUS_COLORS[bill.status]}>{bill.status}</Badge>
                   </TableCell>
                   <TableCell>
+                    {bill.receiptPath ? (
+                      <a
+                        href={bill.receiptPath}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline text-sm flex items-center gap-1"
+                      >
+                        <FileText className="h-3 w-3" />
+                        View
+                      </a>
+                    ) : (
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="image/*,.pdf"
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              handleReceiptUpload(bill._id, e.target.files[0])
+                            }
+                          }}
+                          disabled={uploadingReceipt === bill._id}
+                        />
+                        <span className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                          {uploadingReceipt === bill._id ? (
+                            <span className="animate-spin">⏳</span>
+                          ) : (
+                            <Upload className="h-3 w-3" />
+                          )}
+                          Upload
+                        </span>
+                      </label>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => setViewBill(bill)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       {isAdmin && bill.status === 'pending' && (
                         <Button
                           variant="outline"
@@ -443,6 +587,15 @@ export default function Bills() {
                           onClick={() => handleStatusUpdate(bill._id, 'credited')}
                         >
                           Credit
+                        </Button>
+                      )}
+                      {isAdmin && bill.status === 'credited' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleStatusUpdate(bill._id, 'paid')}
+                        >
+                          Mark Paid
                         </Button>
                       )}
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(bill)}>
@@ -494,6 +647,26 @@ export default function Bills() {
               <DialogDescription>Record a bill with GST details</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+              {vendorSuggestions.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Quick Select Vendor</Label>
+                  <Select onValueChange={(value) => {
+                    const vendor = vendorSuggestions.find(v => v.name === value)
+                    if (vendor) handleVendorSelect(vendor)
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select from previous vendors..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {vendorSuggestions.map((vendor) => (
+                        <SelectItem key={vendor.name} value={vendor.name}>
+                          {vendor.name} {vendor.gstNumber && `(${vendor.gstNumber})`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Vendor Name *</Label>
@@ -589,17 +762,33 @@ export default function Bills() {
                   <p className="text-xs text-muted-foreground">Link this bill to a fund allocation for tracking</p>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Base Amount (Rs.) *</Label>
                   <Input
                     type="number"
                     value={form.baseAmount}
-                    onChange={(e) => setForm({ ...form, baseAmount: e.target.value })}
+                    onChange={(e) => handleBaseAmountChange(e.target.value)}
                     placeholder="10000"
                     required
                     min="0"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>GST Rate</Label>
+                  <Select
+                    value={form.gstRate.toString()}
+                    onValueChange={(value) => handleGstRateChange(parseInt(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GST_RATES.map((rate) => (
+                        <SelectItem key={rate.value} value={rate.value.toString()}>{rate.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>GST Amount (Rs.)</Label>
@@ -629,11 +818,156 @@ export default function Bills() {
                   placeholder="Steel rods - 2 tons"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Payment Method</Label>
+                  <Select
+                    value={form.paymentMethod}
+                    onValueChange={(value) => setForm({ ...form, paymentMethod: value === 'none' ? '' : value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select payment method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not specified</SelectItem>
+                      {PAYMENT_METHODS.map((method) => (
+                        <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Payment Reference</Label>
+                  <Input
+                    value={form.paymentReference}
+                    onChange={(e) => setForm({ ...form, paymentReference: e.target.value })}
+                    placeholder="Cheque no. / UTR / Transaction ID"
+                  />
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button type="submit">{editingId ? 'Update' : 'Add'} Bill</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bill Details View Dialog */}
+      <Dialog open={!!viewBill} onOpenChange={(open) => !open && setViewBill(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              Bill Details
+              <Button variant="ghost" size="icon" onClick={() => setViewBill(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          {viewBill && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendor</p>
+                  <p className="font-medium">{viewBill.vendorName}</p>
+                  {viewBill.vendorGstNumber && (
+                    <p className="text-xs text-muted-foreground">GST: {viewBill.vendorGstNumber}</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Invoice Number</p>
+                  <p className="font-medium">{viewBill.invoiceNumber || '-'}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Bill Date</p>
+                  <p className="font-medium">{formatDate(viewBill.billDate)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Site</p>
+                  <p className="font-medium">{viewBill.site?.name || '-'}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Base Amount</p>
+                  <p className="font-medium">{formatCurrency(viewBill.baseAmount)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">GST ({viewBill.gstRate || 18}%)</p>
+                  <p className="font-medium">{formatCurrency(viewBill.gstAmount)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Amount</p>
+                  <p className="font-bold text-lg">{formatCurrency(viewBill.totalAmount)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  <Badge className={STATUS_COLORS[viewBill.status]}>{viewBill.status}</Badge>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Type</p>
+                  <Badge variant="outline">
+                    {BILL_TYPES.find(t => t.value === viewBill.billType)?.label}
+                  </Badge>
+                </div>
+              </div>
+              {viewBill.paymentMethod && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Payment Method</p>
+                    <p className="font-medium">
+                      {PAYMENT_METHODS.find(m => m.value === viewBill.paymentMethod)?.label || viewBill.paymentMethod}
+                    </p>
+                  </div>
+                  {viewBill.paymentReference && (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Payment Reference</p>
+                      <p className="font-medium">{viewBill.paymentReference}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {viewBill.description && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Description</p>
+                  <p className="font-medium">{viewBill.description}</p>
+                </div>
+              )}
+              {viewBill.receiptPath && (
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2">Receipt</p>
+                  <a
+                    href={viewBill.receiptPath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+                  >
+                    <FileText className="h-4 w-4" />
+                    View Receipt Document
+                  </a>
+                </div>
+              )}
+              <div className="pt-4 border-t">
+                <p className="text-xs text-muted-foreground">
+                  Created by {viewBill.createdBy?.name || 'Unknown'} on {formatDate(viewBill.createdAt)}
+                </p>
+                {viewBill.creditedDate && (
+                  <p className="text-xs text-muted-foreground">
+                    Credited on {formatDate(viewBill.creditedDate)}
+                  </p>
+                )}
+                {viewBill.paidDate && (
+                  <p className="text-xs text-muted-foreground">
+                    Paid on {formatDate(viewBill.paidDate)}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

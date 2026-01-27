@@ -130,7 +130,10 @@ router.post('/', authenticate, async (req, res) => {
       gstAmount,
       description,
       billType,
-      fundAllocationId
+      fundAllocationId,
+      paymentMethod,
+      paymentReference,
+      gstRate
     } = req.body;
 
     // Verify site access
@@ -159,7 +162,10 @@ router.post('/', authenticate, async (req, res) => {
       gstAmount: gstAmount || 0,
       totalAmount,
       description,
-      billType
+      billType,
+      paymentMethod,
+      paymentReference,
+      gstRate: gstRate || 18
     });
 
     await bill.save();
@@ -222,7 +228,10 @@ router.put('/:id', authenticate, async (req, res) => {
       baseAmount,
       gstAmount,
       description,
-      billType
+      billType,
+      paymentMethod,
+      paymentReference,
+      gstRate
     } = req.body;
 
     if (vendorName) bill.vendorName = vendorName;
@@ -239,6 +248,9 @@ router.put('/:id', authenticate, async (req, res) => {
     }
     if (description !== undefined) bill.description = description;
     if (billType) bill.billType = billType;
+    if (paymentMethod !== undefined) bill.paymentMethod = paymentMethod;
+    if (paymentReference !== undefined) bill.paymentReference = paymentReference;
+    if (gstRate !== undefined) bill.gstRate = gstRate;
 
     await bill.save();
     await bill.populate('site', 'name');
@@ -309,6 +321,98 @@ router.post('/:id/receipt', authenticate, upload.single('receipt'), async (req, 
     await bill.save();
 
     res.json(bill);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Export bills to CSV
+router.get('/export/csv', authenticate, async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const { siteId, status, billType, startDate, endDate } = req.query;
+
+    const filter = { organization: req.user.organization };
+
+    if (req.user.role !== 1) {
+      const sites = await Site.find({ assignedUsers: req.user._id }).select('_id');
+      filter.site = { $in: sites.map(s => s._id) };
+    }
+
+    if (siteId) filter.site = siteId;
+    if (status) filter.status = status;
+    if (billType) filter.billType = billType;
+    if (startDate || endDate) {
+      filter.billDate = {};
+      if (startDate) filter.billDate.$gte = new Date(startDate);
+      if (endDate) filter.billDate.$lte = new Date(endDate);
+    }
+
+    const bills = await Bill.find(filter)
+      .populate('site', 'name')
+      .populate('createdBy', 'name')
+      .sort({ billDate: -1 });
+
+    // Generate CSV
+    const headers = ['Date', 'Vendor', 'GST Number', 'Invoice', 'Site', 'Type', 'Base Amount', 'GST Rate', 'GST Amount', 'Total', 'Status', 'Payment Method', 'Payment Ref', 'Created By'];
+    const rows = bills.map(bill => [
+      new Date(bill.billDate).toLocaleDateString('en-IN'),
+      bill.vendorName,
+      bill.vendorGstNumber || '',
+      bill.invoiceNumber || '',
+      bill.site?.name || '',
+      bill.billType,
+      bill.baseAmount,
+      bill.gstRate || 18,
+      bill.gstAmount,
+      bill.totalAmount,
+      bill.status,
+      bill.paymentMethod || '',
+      bill.paymentReference || '',
+      bill.createdBy?.name || ''
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=bills-export-${new Date().toISOString().split('T')[0]}.csv`);
+    res.send(csvContent);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get vendor suggestions (for autocomplete)
+router.get('/vendors/suggestions', authenticate, async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const vendors = await Bill.aggregate([
+      { $match: { organization: req.user.organization } },
+      {
+        $group: {
+          _id: '$vendorName',
+          gstNumber: { $first: '$vendorGstNumber' },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } },
+      { $limit: 50 }
+    ]);
+
+    res.json(vendors.map(v => ({
+      name: v._id,
+      gstNumber: v.gstNumber || '',
+      billCount: v.count
+    })));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

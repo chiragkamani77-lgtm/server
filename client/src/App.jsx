@@ -100,7 +100,7 @@ function AppRoutes() {
         <Route
           path="/attendance"
           element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
+            <ProtectedRoute allowedRoles={[1, 2, 3]}>
               <Attendance />
             </ProtectedRoute>
           }
@@ -108,7 +108,7 @@ function AppRoutes() {
         <Route
           path="/ledger"
           element={
-            <ProtectedRoute allowedRoles={[1, 2, 3]}>
+            <ProtectedRoute allowedRoles={[1, 2, 3, 4]}>
               <WorkerLedger />
             </ProtectedRoute>
           }

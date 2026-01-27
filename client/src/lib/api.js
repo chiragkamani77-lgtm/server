@@ -75,6 +75,7 @@ export const expensesApi = {
   update: (id, data) => api.put(`/expenses/${id}`, data),
   delete: (id) => api.delete(`/expenses/${id}`),
   getSummary: (siteId) => api.get(`/expenses/summary/${siteId}`),
+  approve: (id, data) => api.put(`/expenses/${id}/approve`, data),
   uploadReceipt: (id, file) => {
     const formData = new FormData()
     formData.append('receipt', file)
@@ -166,7 +167,12 @@ export const billsApi = {
     return api.post(`/bills/${id}/receipt`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
-  }
+  },
+  exportCsv: (params) => api.get('/bills/export/csv', {
+    params,
+    responseType: 'blob'
+  }),
+  getVendorSuggestions: () => api.get('/bills/vendors/suggestions')
 }
 
 // Attendance API

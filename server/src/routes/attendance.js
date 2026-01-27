@@ -16,17 +16,22 @@ router.get('/', authenticate, async (req, res) => {
     const filter = { organization: req.user.organization };
 
     // Filter by role
-    if (req.user.role === 3) {
+    // Role 1 = Developer (sees all)
+    // Role 2 = Engineer (sees their team)
+    // Role 3 = Supervisor (sees their workers)
+    // Role 4 = Worker (sees only their own)
+    if (req.user.role === 4) {
       // Workers can only see their own attendance
       filter.worker = req.user._id;
-    } else if (req.user.role === 2) {
-      // Supervisors can see attendance of their children
+    } else if (req.user.role === 2 || req.user.role === 3) {
+      // Engineers and Supervisors can see attendance of their children
       const childIds = await req.user.getChildIds();
-      filter.worker = { $in: [req.user._id, ...childIds] };
+      filter.worker = { $in: [...childIds] };
     }
+    // Role 1 (Developer) sees all - no filter
 
     if (siteId) filter.site = siteId;
-    if (workerId && req.user.role !== 3) filter.worker = workerId;
+    if (workerId && req.user.role !== 4) filter.worker = workerId;
     if (status) filter.status = status;
     if (startDate || endDate) {
       filter.date = {};
@@ -69,13 +74,15 @@ router.get('/summary/:workerId', authenticate, async (req, res) => {
     const { month, year } = req.query;
 
     // Verify access to this worker's data
-    if (req.user.role === 3 && req.user._id.toString() !== workerId) {
+    // Role 4 (Worker) can only see their own data
+    if (req.user.role === 4 && req.user._id.toString() !== workerId) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    if (req.user.role === 2) {
+    // Role 2 (Engineer) and Role 3 (Supervisor) can see their team's data
+    if (req.user.role === 2 || req.user.role === 3) {
       const childIds = await req.user.getChildIds();
-      if (!childIds.some(id => id.toString() === workerId) && req.user._id.toString() !== workerId) {
+      if (!childIds.some(id => id.toString() === workerId)) {
         return res.status(403).json({ message: 'Access denied' });
       }
     }
@@ -148,8 +155,14 @@ router.get('/summary/:workerId', authenticate, async (req, res) => {
       totalOvertime: 0
     };
 
+    const dailyRate = worker.dailyRate || 0;
+    const standardHours = 8; // Standard work day hours
+    const hourlyRate = dailyRate / standardHours;
+
     const effectiveDays = summary.presentDays + (summary.halfDays * 0.5);
-    const estimatedEarnings = effectiveDays * (worker.dailyRate || 0);
+    const baseEarnings = effectiveDays * dailyRate;
+    const overtimeEarnings = summary.totalOvertime * hourlyRate;
+    const estimatedEarnings = baseEarnings + overtimeEarnings;
 
     res.json({
       worker: {
@@ -162,6 +175,9 @@ router.get('/summary/:workerId', authenticate, async (req, res) => {
       year: filterYear,
       summary,
       effectiveDays,
+      hourlyRate,
+      baseEarnings,
+      overtimeEarnings,
       estimatedEarnings,
       statusSummary
     });
@@ -170,8 +186,8 @@ router.get('/summary/:workerId', authenticate, async (req, res) => {
   }
 });
 
-// Mark attendance (Level 2 only - supervisors)
-router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
+// Mark attendance (Developer, Engineer, Supervisor)
+router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     if (!req.user.organization) {
       return res.status(400).json({ message: 'No organization assigned' });
@@ -185,8 +201,8 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(404).json({ message: 'Worker not found' });
     }
 
-    // Level 2 can only mark attendance for their children
-    if (req.user.role === 2) {
+    // Engineer and Supervisor can only mark attendance for their children
+    if (req.user.role === 2 || req.user.role === 3) {
       const childIds = await req.user.getChildIds();
       if (!childIds.some(id => id.toString() === workerId)) {
         return res.status(403).json({ message: 'Can only mark attendance for your team members' });
@@ -244,7 +260,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
 });
 
 // Bulk mark attendance
-router.post('/bulk', authenticate, requireRole(1, 2), async (req, res) => {
+router.post('/bulk', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     if (!req.user.organization) {
       return res.status(400).json({ message: 'No organization assigned' });
@@ -313,7 +329,7 @@ router.post('/bulk', authenticate, requireRole(1, 2), async (req, res) => {
 });
 
 // Update attendance
-router.put('/:id', authenticate, requireRole(1, 2), async (req, res) => {
+router.put('/:id', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     const attendance = await Attendance.findById(req.params.id);
 
@@ -344,8 +360,8 @@ router.put('/:id', authenticate, requireRole(1, 2), async (req, res) => {
   }
 });
 
-// Delete attendance (Level 1 only)
-router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
+// Delete attendance (Developer, Engineer, Supervisor)
+router.delete('/:id', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     const attendance = await Attendance.findById(req.params.id);
 
@@ -355,6 +371,14 @@ router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
 
     if (attendance.organization.toString() !== req.user.organization?.toString()) {
       return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Engineers and Supervisors can only delete entries for their team members
+    if (req.user.role === 2 || req.user.role === 3) {
+      const childIds = await req.user.getChildIds();
+      if (!childIds.some(id => id.toString() === attendance.worker.toString())) {
+        return res.status(403).json({ message: 'Can only delete attendance for your team members' });
+      }
     }
 
     await attendance.deleteOne();

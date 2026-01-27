@@ -16,16 +16,21 @@ router.get('/', authenticate, async (req, res) => {
     const filter = { organization: req.user.organization };
 
     // Filter by role
-    if (req.user.role === 3) {
+    // Role 1 = Developer (sees all)
+    // Role 2 = Engineer (sees their team)
+    // Role 3 = Supervisor (sees their workers)
+    // Role 4 = Worker (sees only their own)
+    if (req.user.role === 4) {
       // Workers can only see their own ledger
       filter.worker = req.user._id;
-    } else if (req.user.role === 2) {
-      // Supervisors can see ledger of their children
+    } else if (req.user.role === 2 || req.user.role === 3) {
+      // Engineers and Supervisors can see ledger of their children
       const childIds = await req.user.getChildIds();
       filter.worker = { $in: childIds };
     }
+    // Role 1 (Developer) sees all - no filter
 
-    if (workerId && req.user.role !== 3) filter.worker = workerId;
+    if (workerId && req.user.role !== 4) filter.worker = workerId;
     if (siteId) filter.site = siteId;
     if (type) filter.type = type;
     if (category) filter.category = category;
@@ -70,11 +75,13 @@ router.get('/balance/:workerId', authenticate, async (req, res) => {
     const { workerId } = req.params;
 
     // Verify access
-    if (req.user.role === 3 && req.user._id.toString() !== workerId) {
+    // Role 4 (Worker) can only see their own balance
+    if (req.user.role === 4 && req.user._id.toString() !== workerId) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    if (req.user.role === 2) {
+    // Role 2 (Engineer) and Role 3 (Supervisor) can see their team's balance
+    if (req.user.role === 2 || req.user.role === 3) {
       const childIds = await req.user.getChildIds();
       if (!childIds.some(id => id.toString() === workerId)) {
         return res.status(403).json({ message: 'Access denied' });
@@ -155,8 +162,8 @@ router.get('/balance/:workerId', authenticate, async (req, res) => {
   }
 });
 
-// Create ledger entry (Level 1 and 2)
-router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
+// Create ledger entry (Developer, Engineer, Supervisor)
+router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     if (!req.user.organization) {
       return res.status(400).json({ message: 'No organization assigned' });
@@ -170,8 +177,8 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(404).json({ message: 'Worker not found' });
     }
 
-    // Level 2 can only create entries for their children
-    if (req.user.role === 2) {
+    // Engineer and Supervisor can only create entries for their children
+    if (req.user.role === 2 || req.user.role === 3) {
       const childIds = await req.user.getChildIds();
       if (!childIds.some(id => id.toString() === workerId)) {
         return res.status(403).json({ message: 'Can only manage ledger for your team members' });
@@ -242,7 +249,7 @@ router.get('/:id', authenticate, async (req, res) => {
     }
 
     // Workers can only see their own entries
-    if (req.user.role === 3 && entry.worker._id.toString() !== req.user._id.toString()) {
+    if (req.user.role === 4 && entry.worker._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
 
@@ -253,7 +260,7 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Update entry
-router.put('/:id', authenticate, requireRole(1, 2), async (req, res) => {
+router.put('/:id', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     const entry = await WorkerLedger.findById(req.params.id);
 

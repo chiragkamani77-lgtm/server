@@ -29,9 +29,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { formatDate } from '@/lib/utils'
-import { Plus, Users, Calendar, Clock, CheckCircle, XCircle, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Users, Calendar, Clock, CheckCircle, XCircle, Filter, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
 
 const STATUS_COLORS = {
   present: 'bg-green-100 text-green-800',
@@ -48,6 +58,7 @@ export default function Attendance() {
   const [sites, setSites] = useState([])
   const [workers, setWorkers] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
+  const [deleteId, setDeleteId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [isBulkOpen, setIsBulkOpen] = useState(false)
@@ -65,8 +76,17 @@ export default function Attendance() {
     date: new Date().toISOString().split('T')[0],
     status: 'present',
     hoursWorked: '8',
+    overtime: '0',
     notes: '',
   })
+
+  // Get selected worker's details
+  const selectedWorker = workers.find(w => w._id === form.workerId)
+  const dailyRate = selectedWorker?.dailyRate || 0
+  const hourlyRate = dailyRate / 8
+  const baseEarnings = form.status === 'present' ? dailyRate : form.status === 'half_day' ? dailyRate / 2 : 0
+  const overtimeEarnings = parseFloat(form.overtime || 0) * hourlyRate
+  const totalEarnings = baseEarnings + overtimeEarnings
 
   const [bulkForm, setBulkForm] = useState({
     siteId: '',
@@ -112,7 +132,7 @@ export default function Attendance() {
         ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v)),
       }
       const { data } = await attendanceApi.getAll(params)
-      setRecords(data?.records || [])
+      setRecords(data?.attendance || [])
       setPagination(data?.pagination || { page: 1, pages: 1, total: 0 })
     } catch (error) {
       toast({
@@ -133,7 +153,8 @@ export default function Attendance() {
         siteId: form.siteId || null,
         date: form.date,
         status: form.status,
-        hoursWorked: form.status === 'present' ? parseFloat(form.hoursWorked) : 0,
+        hoursWorked: form.status === 'present' ? parseFloat(form.hoursWorked) : form.status === 'half_day' ? 4 : 0,
+        overtime: parseFloat(form.overtime) || 0,
         notes: form.notes,
       })
       toast({ title: 'Attendance recorded' })
@@ -152,17 +173,16 @@ export default function Attendance() {
   const handleBulkSubmit = async (e) => {
     e.preventDefault()
     try {
-      const recordsToSubmit = bulkForm.records
+      const attendanceList = bulkForm.records
         .filter(r => r.status)
         .map(r => ({
           workerId: r.workerId,
-          siteId: bulkForm.siteId || null,
-          date: bulkForm.date,
           status: r.status,
-          hoursWorked: r.status === 'present' ? parseFloat(r.hoursWorked || 8) : 0,
+          hoursWorked: r.status === 'present' ? parseFloat(r.hoursWorked || 8) : r.status === 'half_day' ? 4 : 0,
+          overtime: parseFloat(r.overtime || 0),
         }))
 
-      if (recordsToSubmit.length === 0) {
+      if (attendanceList.length === 0) {
         toast({
           title: 'Error',
           description: 'Please mark attendance for at least one worker',
@@ -171,8 +191,12 @@ export default function Attendance() {
         return
       }
 
-      await attendanceApi.bulkCreate({ records: recordsToSubmit })
-      toast({ title: `Attendance recorded for ${recordsToSubmit.length} workers` })
+      await attendanceApi.bulkCreate({
+        siteId: bulkForm.siteId || null,
+        date: bulkForm.date,
+        attendanceList
+      })
+      toast({ title: `Attendance recorded for ${attendanceList.length} workers` })
       setIsBulkOpen(false)
       resetBulkForm()
       fetchRecords()
@@ -185,6 +209,21 @@ export default function Attendance() {
     }
   }
 
+  const handleDelete = async () => {
+    try {
+      await attendanceApi.delete(deleteId)
+      toast({ title: 'Attendance record deleted' })
+      setDeleteId(null)
+      fetchRecords()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete attendance',
+        variant: 'destructive',
+      })
+    }
+  }
+
   const resetForm = () => {
     setForm({
       workerId: '',
@@ -192,6 +231,7 @@ export default function Attendance() {
       date: new Date().toISOString().split('T')[0],
       status: 'present',
       hoursWorked: '8',
+      overtime: '0',
       notes: '',
     })
   }
@@ -210,8 +250,10 @@ export default function Attendance() {
       records: workers.map(w => ({
         workerId: w._id,
         workerName: w.name,
+        dailyRate: w.dailyRate || 0,
         status: '',
         hoursWorked: '8',
+        overtime: '0',
       })),
     })
     setIsBulkOpen(true)
@@ -404,14 +446,17 @@ export default function Attendance() {
               <TableHead>Site</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Hours</TableHead>
+              <TableHead>Overtime</TableHead>
+              <TableHead>Daily Rate</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Marked By</TableHead>
+              <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={10} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -419,7 +464,7 @@ export default function Attendance() {
               </TableRow>
             ) : records.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No attendance records found
                 </TableCell>
               </TableRow>
@@ -442,8 +487,27 @@ export default function Attendance() {
                       </span>
                     )}
                   </TableCell>
+                  <TableCell>
+                    {record.overtime > 0 && (
+                      <span className="text-orange-600 font-medium">+{record.overtime}h</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {record.worker?.dailyRate > 0 && (
+                      <span className="text-green-600">₹{record.worker.dailyRate}</span>
+                    )}
+                  </TableCell>
                   <TableCell className="max-w-[150px] truncate">{record.notes || '-'}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{record.markedBy?.name}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setDeleteId(record._id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))
             )}
@@ -495,11 +559,25 @@ export default function Attendance() {
                   </SelectTrigger>
                   <SelectContent>
                     {workers.map((worker) => (
-                      <SelectItem key={worker._id} value={worker._id}>{worker.name}</SelectItem>
+                      <SelectItem key={worker._id} value={worker._id}>
+                        {worker.name} {worker.dailyRate > 0 && `(₹${worker.dailyRate}/day)`}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
+              {selectedWorker && (
+                <div className="bg-blue-50 p-3 rounded-lg space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Daily Rate:</span>
+                    <span className="font-medium">₹{dailyRate.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Hourly Rate:</span>
+                    <span className="font-medium">₹{hourlyRate.toFixed(2)}/hr</span>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Site</Label>
                 <Select
@@ -545,17 +623,51 @@ export default function Attendance() {
                   </Select>
                 </div>
               </div>
-              {form.status === 'present' && (
-                <div className="space-y-2">
-                  <Label>Hours Worked</Label>
-                  <Input
-                    type="number"
-                    value={form.hoursWorked}
-                    onChange={(e) => setForm({ ...form, hoursWorked: e.target.value })}
-                    min="0"
-                    max="24"
-                    step="0.5"
-                  />
+              {(form.status === 'present' || form.status === 'half_day') && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Hours Worked</Label>
+                    <Input
+                      type="number"
+                      value={form.status === 'half_day' ? '4' : form.hoursWorked}
+                      onChange={(e) => setForm({ ...form, hoursWorked: e.target.value })}
+                      min="0"
+                      max="24"
+                      step="0.5"
+                      disabled={form.status === 'half_day'}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Overtime Hours</Label>
+                    <Input
+                      type="number"
+                      value={form.overtime}
+                      onChange={(e) => setForm({ ...form, overtime: e.target.value })}
+                      min="0"
+                      max="16"
+                      step="0.5"
+                      placeholder="Extra hours"
+                    />
+                  </div>
+                </div>
+              )}
+              {selectedWorker && dailyRate > 0 && (form.status === 'present' || form.status === 'half_day') && (
+                <div className="bg-green-50 p-3 rounded-lg space-y-1 border border-green-200">
+                  <div className="text-sm font-medium text-green-800 mb-2">Earnings Calculation</div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Base ({form.status === 'half_day' ? 'Half Day' : 'Full Day'}):</span>
+                    <span>₹{baseEarnings.toFixed(2)}</span>
+                  </div>
+                  {parseFloat(form.overtime) > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Overtime ({form.overtime} hrs × ₹{hourlyRate.toFixed(2)}):</span>
+                      <span>₹{overtimeEarnings.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                    <span>Total Earnings:</span>
+                    <span className="text-green-700">₹{totalEarnings.toFixed(2)}</span>
+                  </div>
                 </div>
               )}
               <div className="space-y-2">
@@ -616,14 +728,23 @@ export default function Attendance() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Worker</TableHead>
+                      <TableHead>Daily Rate</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Hours</TableHead>
+                      <TableHead>Overtime</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {bulkForm.records.map((record, index) => (
                       <TableRow key={record.workerId}>
                         <TableCell className="font-medium">{record.workerName}</TableCell>
+                        <TableCell>
+                          {record.dailyRate > 0 ? (
+                            <span className="text-green-600">₹{record.dailyRate}</span>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">Not set</span>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <Select
                             value={record.status}
@@ -643,12 +764,24 @@ export default function Attendance() {
                         <TableCell>
                           <Input
                             type="number"
-                            value={record.hoursWorked}
+                            value={record.status === 'half_day' ? '4' : record.hoursWorked}
                             onChange={(e) => updateBulkRecord(index, 'hoursWorked', e.target.value)}
-                            className="w-[80px]"
+                            className="w-[70px]"
                             min="0"
                             max="24"
                             disabled={record.status !== 'present'}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            value={record.overtime}
+                            onChange={(e) => updateBulkRecord(index, 'overtime', e.target.value)}
+                            className="w-[70px]"
+                            min="0"
+                            max="16"
+                            placeholder="0"
+                            disabled={!record.status || record.status === 'absent' || record.status === 'leave'}
                           />
                         </TableCell>
                       </TableRow>
@@ -663,6 +796,24 @@ export default function Attendance() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Attendance Record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this attendance record. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

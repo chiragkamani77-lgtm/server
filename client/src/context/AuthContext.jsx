@@ -55,11 +55,12 @@ export function AuthProvider({ children }) {
     logout,
     refreshUser: checkAuth,
     isAuthenticated: !!user,
-    isAdmin: user?.role === 1,
-    isSupervisor: user?.role === 2,
-    isWorker: user?.role === 3,
-    canManageUsers: user?.role === 1 || user?.role === 2,
-    canManageSites: user?.role === 1,
+    isAdmin: user?.role === 1,        // Developer
+    isEngineer: user?.role === 2,     // Engineer
+    isSupervisor: user?.role === 2 || user?.role === 3,  // Engineer or Supervisor (backward compatible)
+    isWorker: user?.role === 4,       // Worker
+    canManageUsers: user?.role === 1 || user?.role === 2 || user?.role === 3,
+    canManageSites: user?.role === 1 || user?.role === 2,
     hasOrganization: !!user?.organization,
   }
 

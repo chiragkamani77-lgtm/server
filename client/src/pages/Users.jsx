@@ -58,7 +58,8 @@ export default function Users() {
     name: '',
     email: '',
     password: '',
-    role: '3',
+    role: '4',
+    dailyRate: '',
   })
 
   useEffect(() => {
@@ -83,12 +84,17 @@ export default function Users() {
   const handleAdd = async (e) => {
     e.preventDefault()
     try {
-      await usersApi.create({
+      const userData = {
         name: form.name,
         email: form.email,
         password: form.password,
         role: parseInt(form.role),
-      })
+      }
+      // Add dailyRate for workers (role 4) or supervisors (role 3)
+      if (form.dailyRate && (form.role === '4' || form.role === '3')) {
+        userData.dailyRate = parseFloat(form.dailyRate)
+      }
+      await usersApi.create(userData)
       toast({ title: 'User created successfully' })
       setIsAddOpen(false)
       resetForm()
@@ -111,6 +117,10 @@ export default function Users() {
       }
       if (form.password) {
         updateData.password = form.password
+      }
+      // Include dailyRate for workers and supervisors
+      if (editingUser.role === 4 || editingUser.role === 3) {
+        updateData.dailyRate = parseFloat(form.dailyRate) || 0
       }
       await usersApi.update(editingUser._id, updateData)
       toast({ title: 'User updated successfully' })
@@ -163,6 +173,7 @@ export default function Users() {
       email: user.email,
       password: '',
       role: user.role.toString(),
+      dailyRate: user.dailyRate?.toString() || '',
     })
     setIsEditOpen(true)
   }
@@ -172,7 +183,8 @@ export default function Users() {
       name: '',
       email: '',
       password: '',
-      role: '3',
+      role: '4',
+      dailyRate: '',
     })
   }
 
@@ -249,6 +261,7 @@ export default function Users() {
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Daily Rate</TableHead>
                 <TableHead>Reports To</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead></TableHead>
@@ -257,7 +270,7 @@ export default function Users() {
             <TableBody>
               {users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     No users found
                   </TableCell>
                 </TableRow>
@@ -270,6 +283,15 @@ export default function Users() {
                       <Badge className={ROLE_COLORS[u.role]}>
                         {ROLE_NAMES[u.role]}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {(u.role === 3 || u.role === 4) && u.dailyRate > 0 ? (
+                        <span className="text-green-600 font-medium">₹{u.dailyRate}/day</span>
+                      ) : (u.role === 3 || u.role === 4) ? (
+                        <span className="text-muted-foreground text-sm">Not set</span>
+                      ) : (
+                        '-'
+                      )}
                     </TableCell>
                     <TableCell>
                       {u.parent?.name || '-'}
@@ -371,10 +393,27 @@ export default function Users() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="2">Supervisor</SelectItem>
-                      <SelectItem value="3">Worker</SelectItem>
+                      <SelectItem value="2">Engineer</SelectItem>
+                      <SelectItem value="3">Supervisor</SelectItem>
+                      <SelectItem value="4">Worker</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+              {(form.role === '3' || form.role === '4') && (
+                <div className="space-y-2">
+                  <Label>Daily Rate (₹)</Label>
+                  <Input
+                    type="number"
+                    value={form.dailyRate}
+                    onChange={(e) => setForm({ ...form, dailyRate: e.target.value })}
+                    placeholder="e.g., 355"
+                    min="0"
+                    step="0.01"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Amount paid per day (8 hours). Hourly rate = Daily rate ÷ 8
+                  </p>
                 </div>
               )}
             </div>
@@ -423,6 +462,22 @@ export default function Users() {
                   minLength={6}
                 />
               </div>
+              {editingUser && (editingUser.role === 3 || editingUser.role === 4) && (
+                <div className="space-y-2">
+                  <Label>Daily Rate (₹)</Label>
+                  <Input
+                    type="number"
+                    value={form.dailyRate}
+                    onChange={(e) => setForm({ ...form, dailyRate: e.target.value })}
+                    placeholder="e.g., 355"
+                    min="0"
+                    step="0.01"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Amount paid per day (8 hours). Hourly rate: ₹{form.dailyRate ? (parseFloat(form.dailyRate) / 8).toFixed(2) : '0.00'}/hr
+                  </p>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button type="submit">Save Changes</Button>

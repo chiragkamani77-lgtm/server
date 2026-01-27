@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { expensesApi, sitesApi, categoriesApi } from '@/lib/api'
+import { expensesApi, sitesApi, categoriesApi, fundsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,7 +32,24 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Filter, Trash2, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Filter, Trash2, Upload, ChevronLeft, ChevronRight, CheckCircle, Eye, X } from 'lucide-react'
+
+const STATUS_COLORS = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  approved: 'bg-blue-100 text-blue-800',
+  paid: 'bg-green-100 text-green-800',
+  rejected: 'bg-red-100 text-red-800',
+}
+
+const PAYMENT_METHODS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'cheque', label: 'Cheque' },
+  { value: 'upi', label: 'UPI' },
+  { value: 'neft', label: 'NEFT' },
+  { value: 'rtgs', label: 'RTGS' },
+  { value: 'other', label: 'Other' },
+]
 
 export default function Expenses() {
   const { user, isAdmin } = useAuth()
@@ -41,10 +58,20 @@ export default function Expenses() {
   const [expenses, setExpenses] = useState([])
   const [sites, setSites] = useState([])
   const [categories, setCategories] = useState([])
+  const [fundAllocations, setFundAllocations] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
+  const [approveExpense, setApproveExpense] = useState(null)
+  const [viewExpense, setViewExpense] = useState(null)
+  const [approveForm, setApproveForm] = useState({
+    status: 'approved',
+    approvedAmount: '',
+    approvalNotes: '',
+    paymentMethod: '',
+    paymentReference: '',
+  })
 
   const [filters, setFilters] = useState({
     siteId: '',
@@ -72,12 +99,14 @@ export default function Expenses() {
 
   const fetchInitialData = async () => {
     try {
-      const [sitesRes, categoriesRes] = await Promise.all([
+      const [sitesRes, categoriesRes, fundsRes] = await Promise.all([
         sitesApi.getAll(),
         categoriesApi.getAll(),
+        fundsApi.getAll({ status: 'disbursed' }),
       ])
       setSites(sitesRes.data)
       setCategories(categoriesRes.data)
+      setFundAllocations(fundsRes.data?.allocations || [])
     } catch (error) {
       console.error('Error fetching initial data:', error)
     }
@@ -165,7 +194,51 @@ export default function Expenses() {
     setPagination({ ...pagination, page: 1 })
   }
 
-  const totalFiltered = expenses.reduce((sum, e) => sum + e.amount, 0)
+  const handleApprove = async (e) => {
+    e.preventDefault()
+    try {
+      await expensesApi.approve(approveExpense._id, {
+        status: approveForm.status,
+        approvedAmount: parseFloat(approveForm.approvedAmount),
+        approvalNotes: approveForm.approvalNotes,
+        paymentMethod: approveForm.paymentMethod || null,
+        paymentReference: approveForm.paymentReference || null,
+      })
+      toast({ title: `Expense ${approveForm.status === 'paid' ? 'paid' : 'approved'} successfully` })
+      setApproveExpense(null)
+      resetApproveForm()
+      fetchExpenses()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to approve expense',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const resetApproveForm = () => {
+    setApproveForm({
+      status: 'approved',
+      approvedAmount: '',
+      approvalNotes: '',
+      paymentMethod: '',
+      paymentReference: '',
+    })
+  }
+
+  const openApproveDialog = (expense) => {
+    setApproveForm({
+      status: 'approved',
+      approvedAmount: expense.requestedAmount?.toString() || expense.amount?.toString() || '',
+      approvalNotes: '',
+      paymentMethod: '',
+      paymentReference: '',
+    })
+    setApproveExpense(expense)
+  }
+
+  const totalFiltered = expenses.reduce((sum, e) => sum + (e.amount || 0), 0)
 
   return (
     <div className="space-y-6">
@@ -289,14 +362,16 @@ export default function Expenses() {
               <TableHead>Description</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead>Added By</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
+              <TableHead className="text-right">Requested</TableHead>
+              <TableHead className="text-right">Approved</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={10} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -304,7 +379,7 @@ export default function Expenses() {
               </TableRow>
             ) : expenses.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No expenses found
                 </TableCell>
               </TableRow>
@@ -321,11 +396,32 @@ export default function Expenses() {
                   </TableCell>
                   <TableCell>{expense.vendorName || '-'}</TableCell>
                   <TableCell>{expense.user?.name}</TableCell>
+                  <TableCell className="text-right">
+                    {expense.amountHidden ? (
+                      <span className="text-muted-foreground text-xs">Hidden</span>
+                    ) : (
+                      formatCurrency(expense.requestedAmount || expense.amount || 0)
+                    )}
+                  </TableCell>
                   <TableCell className="text-right font-medium">
-                    {formatCurrency(expense.amount)}
+                    {expense.amountHidden ? (
+                      <span className="text-muted-foreground text-xs">Hidden</span>
+                    ) : expense.approvedAmount ? (
+                      formatCurrency(expense.approvedAmount)
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={STATUS_COLORS[expense.status || 'pending']}>
+                      {expense.status || 'pending'}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => setViewExpense(expense)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       {expense.receiptPath && (
                         <Button variant="ghost" size="icon" asChild>
                           <a href={expense.receiptPath} target="_blank" rel="noopener noreferrer">
@@ -333,7 +429,38 @@ export default function Expenses() {
                           </a>
                         </Button>
                       )}
-                      {(isAdmin || expense.user?._id === user?._id) && (
+                      {/* Developer can approve pending expenses */}
+                      {isAdmin && expense.status === 'pending' && !expense.amountHidden && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openApproveDialog(expense)}
+                        >
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Approve
+                        </Button>
+                      )}
+                      {/* Developer can mark approved as paid */}
+                      {isAdmin && expense.status === 'approved' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setApproveForm({
+                              status: 'paid',
+                              approvedAmount: expense.approvedAmount?.toString() || '',
+                              approvalNotes: '',
+                              paymentMethod: '',
+                              paymentReference: '',
+                            })
+                            setApproveExpense(expense)
+                          }}
+                        >
+                          Mark Paid
+                        </Button>
+                      )}
+                      {/* Developer can delete any, others only their own pending */}
+                      {(isAdmin || (expense.user?._id === user?._id && expense.status === 'pending')) && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -426,7 +553,7 @@ export default function Expenses() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Amount (Rs.)</Label>
+                <Label>{isAdmin ? 'Amount (Rs.)' : 'Requested Amount (Rs.)'}</Label>
                 <Input
                   type="number"
                   value={form.amount}
@@ -436,6 +563,11 @@ export default function Expenses() {
                   min="0"
                   step="0.01"
                 />
+                {!isAdmin && (
+                  <p className="text-xs text-muted-foreground">
+                    Developer will approve the final payment amount
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Description</Label>
@@ -475,6 +607,227 @@ export default function Expenses() {
               <Button type="submit">Add Expense</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve/Pay Dialog - Developer Only */}
+      <Dialog open={!!approveExpense} onOpenChange={(open) => !open && setApproveExpense(null)}>
+        <DialogContent>
+          <form onSubmit={handleApprove}>
+            <DialogHeader>
+              <DialogTitle>
+                {approveForm.status === 'paid' ? 'Mark as Paid' : 'Approve Expense'}
+              </DialogTitle>
+              <DialogDescription>
+                {approveExpense && (
+                  <span>
+                    {approveExpense.user?.name} requested {formatCurrency(approveExpense.requestedAmount || approveExpense.amount || 0)} for {approveExpense.description || 'expense'}
+                  </span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {approveForm.status !== 'paid' && (
+                <div className="space-y-2">
+                  <Label>Action</Label>
+                  <Select
+                    value={approveForm.status}
+                    onValueChange={(value) => setApproveForm({ ...approveForm, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="approved">Approve</SelectItem>
+                      <SelectItem value="paid">Approve & Pay</SelectItem>
+                      <SelectItem value="rejected">Reject</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {approveForm.status !== 'rejected' && (
+                <div className="space-y-2">
+                  <Label>Approved Amount (Rs.) *</Label>
+                  <Input
+                    type="number"
+                    value={approveForm.approvedAmount}
+                    onChange={(e) => setApproveForm({ ...approveForm, approvedAmount: e.target.value })}
+                    placeholder="Amount to pay"
+                    required
+                    min="0"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This is the actual amount you will pay from your fund
+                  </p>
+                </div>
+              )}
+              {(approveForm.status === 'paid') && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Payment Method</Label>
+                    <Select
+                      value={approveForm.paymentMethod}
+                      onValueChange={(value) => setApproveForm({ ...approveForm, paymentMethod: value === 'none' ? '' : value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not specified</SelectItem>
+                        {PAYMENT_METHODS.map((method) => (
+                          <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Payment Reference</Label>
+                    <Input
+                      value={approveForm.paymentReference}
+                      onChange={(e) => setApproveForm({ ...approveForm, paymentReference: e.target.value })}
+                      placeholder="UTR / Cheque No. / Transaction ID"
+                    />
+                  </div>
+                </>
+              )}
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea
+                  value={approveForm.approvalNotes}
+                  onChange={(e) => setApproveForm({ ...approveForm, approvalNotes: e.target.value })}
+                  placeholder="Any notes for this approval..."
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setApproveExpense(null)}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                {approveForm.status === 'rejected' ? 'Reject' : approveForm.status === 'paid' ? 'Pay' : 'Approve'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Expense Dialog */}
+      <Dialog open={!!viewExpense} onOpenChange={(open) => !open && setViewExpense(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              Expense Details
+              <Button variant="ghost" size="icon" onClick={() => setViewExpense(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          {viewExpense && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Added By</p>
+                  <p className="font-medium">{viewExpense.user?.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Date</p>
+                  <p className="font-medium">{formatDate(viewExpense.expenseDate)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Site</p>
+                  <p className="font-medium">{viewExpense.site?.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Category</p>
+                  <Badge variant="outline">{viewExpense.category?.name}</Badge>
+                </div>
+              </div>
+              {!viewExpense.amountHidden && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Requested Amount</p>
+                    <p className="font-medium">{formatCurrency(viewExpense.requestedAmount || viewExpense.amount || 0)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Approved Amount</p>
+                    <p className="font-bold text-lg">
+                      {viewExpense.approvedAmount ? formatCurrency(viewExpense.approvedAmount) : '-'}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {viewExpense.amountHidden && (
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="text-sm text-muted-foreground">Amount details are hidden for this entry</p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  <Badge className={STATUS_COLORS[viewExpense.status || 'pending']}>
+                    {viewExpense.status || 'pending'}
+                  </Badge>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendor</p>
+                  <p className="font-medium">{viewExpense.vendorName || '-'}</p>
+                </div>
+              </div>
+              {viewExpense.description && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Description</p>
+                  <p className="font-medium">{viewExpense.description}</p>
+                </div>
+              )}
+              {viewExpense.paymentMethod && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Payment Method</p>
+                    <p className="font-medium">
+                      {PAYMENT_METHODS.find(m => m.value === viewExpense.paymentMethod)?.label || viewExpense.paymentMethod}
+                    </p>
+                  </div>
+                  {viewExpense.paymentReference && (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Payment Reference</p>
+                      <p className="font-medium">{viewExpense.paymentReference}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {viewExpense.approvalNotes && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Approval Notes</p>
+                  <p className="font-medium">{viewExpense.approvalNotes}</p>
+                </div>
+              )}
+              {viewExpense.receiptPath && (
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2">Receipt</p>
+                  <a
+                    href={viewExpense.receiptPath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+                  >
+                    <Upload className="h-4 w-4" />
+                    View Receipt
+                  </a>
+                </div>
+              )}
+              <div className="pt-4 border-t text-xs text-muted-foreground">
+                <p>Created: {formatDate(viewExpense.createdAt)}</p>
+                {viewExpense.approvedBy && (
+                  <p>Approved by: {viewExpense.approvedBy?.name} on {formatDate(viewExpense.approvalDate)}</p>
+                )}
+                {viewExpense.paidDate && (
+                  <p>Paid on: {formatDate(viewExpense.paidDate)}</p>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

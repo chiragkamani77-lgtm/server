@@ -22,8 +22,8 @@ const userSchema = new mongoose.Schema({
   role: {
     type: Number,
     required: true,
-    enum: [1, 2, 3], // 1=Developer, 2=Supervisor, 3=Worker
-    default: 3
+    enum: [1, 2, 3, 4], // 1=Developer, 2=Engineer, 3=Supervisor, 4=Worker
+    default: 4
   },
   parent: {
     type: mongoose.Schema.Types.ObjectId,
