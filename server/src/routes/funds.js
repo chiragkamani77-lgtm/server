@@ -56,8 +56,10 @@ async function validateFundAvailability(fundAllocationId, requestedAmount) {
 async function validateInvestmentPool(requestedAmount, organization) {
   try {
     // Convert to ObjectId for consistent comparison
-    // Always convert to ensure proper format for aggregation queries
-    const orgId = mongoose.Types.ObjectId.createFromHexString(organization.toString());
+    // Check if already ObjectId instance to avoid unnecessary conversion
+    const orgId = organization instanceof mongoose.Types.ObjectId
+      ? organization
+      : mongoose.Types.ObjectId.createFromHexString(organization.toString());
 
     // Get total investment
     const investments = await Investment.find({ organization: orgId });
@@ -107,9 +109,14 @@ async function validateInvestmentPool(requestedAmount, organization) {
 async function validateWalletBalance(userId, requestedAmount, organization) {
   try {
     // Convert to ObjectId for consistent comparison
-    // Always convert to ensure proper format for aggregation queries
-    const orgId = mongoose.Types.ObjectId.createFromHexString(organization.toString());
-    const userObjId = mongoose.Types.ObjectId.createFromHexString(userId.toString());
+    // Check if already ObjectId instance to avoid unnecessary conversion
+    const orgId = organization instanceof mongoose.Types.ObjectId
+      ? organization
+      : mongoose.Types.ObjectId.createFromHexString(organization.toString());
+
+    const userObjId = userId instanceof mongoose.Types.ObjectId
+      ? userId
+      : mongoose.Types.ObjectId.createFromHexString(userId.toString());
 
     // Get total received (wallet credits)
     const receivedAgg = await FundAllocation.aggregate([
@@ -196,12 +203,14 @@ async function validateWalletBalance(userId, requestedAmount, organization) {
     const netLedger = ledgerCredits - ledgerDebits;
 
     // Get sub-allocations (funds passed down to others)
+    // Exclude self-allocations to avoid double-counting
     const subAllocationsAgg = await FundAllocation.aggregate([
       {
         $match: {
           organization: orgId,
           fromUser: userObjId,
-          status: 'disbursed'
+          status: 'disbursed',
+          $expr: { $ne: ['$fromUser', '$toUser'] } // Exclude self-allocations
         }
       },
       {
@@ -395,15 +404,23 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
+    // Convert userId properly - handle both string query param and ObjectId from req.user
     const userId = req.query.userId && req.user.role === 1
-      ? mongoose.Types.ObjectId.createFromHexString(req.query.userId)
+      ? (req.query.userId instanceof mongoose.Types.ObjectId
+          ? req.query.userId
+          : mongoose.Types.ObjectId.createFromHexString(req.query.userId))
       : req.user._id;
+
+    // Convert organization properly
+    const orgId = req.user.organization instanceof mongoose.Types.ObjectId
+      ? req.user.organization
+      : mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString());
 
     // Total received (credited to wallet from Investment)
     const receivedAgg = await FundAllocation.aggregate([
       {
         $match: {
-          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          organization: orgId,
           toUser: userId,
           status: 'disbursed'
         }
@@ -424,7 +441,7 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
     const expensesAgg = await Expense.aggregate([
       {
         $match: {
-          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          organization: orgId,
           user: userId
         }
       },
@@ -444,7 +461,7 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
     const billsAgg = await Bill.aggregate([
       {
         $match: {
-          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          organization: orgId,
           createdBy: userId,
           status: { $in: ['credited', 'paid'] }
         }
@@ -463,7 +480,7 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
 
     // Worker ledger entries linked to this user's fund allocations
     const userAllocations = await FundAllocation.find({
-      organization: req.user.organization,
+      organization: orgId,
       toUser: userId,
       status: 'disbursed'
     }).select('_id');
@@ -473,7 +490,7 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
     const ledgerAgg = await WorkerLedger.aggregate([
       {
         $match: {
-          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          organization: orgId,
           fundAllocation: { $in: allocationIds }
         }
       },
@@ -491,8 +508,29 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
     const netLedger = ledgerCredits - ledgerDebits;
     const ledgerCount = ledgerAgg.reduce((sum, l) => sum + l.count, 0);
 
-    // Calculate totals
-    const totalSpent = totalExpenses + totalBills + netLedger;
+    // Get sub-allocations (funds passed down to others)
+    // Exclude self-allocations to avoid double-counting
+    const subAllocationsAgg = await FundAllocation.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          fromUser: userId,
+          status: 'disbursed',
+          $expr: { $ne: ['$fromUser', '$toUser'] } // Exclude self-allocations
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalSubAllocated: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalSubAllocated = subAllocationsAgg[0]?.totalSubAllocated || 0;
+
+    // Calculate totals - include sub-allocations in spent amount
+    const totalSpent = totalExpenses + totalBills + netLedger + totalSubAllocated;
     const remainingBalance = totalReceived - totalSpent;
 
     res.json({
@@ -512,6 +550,10 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
           debits: ledgerDebits,
           net: netLedger,
           count: ledgerCount
+        },
+        subAllocations: {
+          total: totalSubAllocated,
+          count: subAllocationsAgg[0] ? 1 : 0
         }
       },
       totalSpent,
@@ -563,10 +605,12 @@ router.get('/:id/utilization', authenticate, async (req, res) => {
     const ledgerDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((sum, e) => sum + e.amount, 0);
 
     // Get sub-allocations (funds passed down to others)
+    // Exclude self-allocations to avoid double-counting
     const subAllocations = await FundAllocation.find({
       organization: allocation.organization,
       fromUser: allocation.toUser._id,
-      status: 'disbursed'
+      status: 'disbursed',
+      toUser: { $ne: allocation.toUser._id } // Exclude self-allocations
     }).populate('toUser', 'name email role');
 
     const totalSubAllocated = subAllocations.reduce((sum, a) => sum + a.amount, 0);
