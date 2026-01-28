@@ -277,7 +277,7 @@ export default function Sites() {
                 </div>
 
                 {/* GST Bill Summary (for admins only) */}
-                {isAdmin && site.gstSummary && site.gstSummary.totalBills > 0 && (
+                {/* {isAdmin && site.gstSummary && site.gstSummary.totalBills > 0 && (
                   <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-lg p-3 mb-4">
                     <div className="text-xs font-semibold text-orange-900 mb-2">GST Bills Summary</div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
@@ -299,7 +299,7 @@ export default function Sites() {
                       </div>
                     </div>
                   </div>
-                )}
+                )} */}
 
                 <div className="flex gap-2">
                   <Button asChild variant="outline" size="sm" className="flex-1">
