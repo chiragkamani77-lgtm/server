@@ -193,6 +193,23 @@ export default function Users() {
   const supervisorCount = users.filter(u => u.role === 2).length
   const workerCount = users.filter(u => u.role === 3).length
 
+  // Check if current user can manage a specific user
+  const canManageUser = (user) => {
+    // Can't manage yourself
+    if (user._id === currentUser._id) return false
+
+    // Admins can manage everyone
+    if (isAdmin) return true
+
+    // Non-admins can only manage users with lower role numbers (higher hierarchy)
+    // Engineer (2) cannot manage Developer (1) or other Engineers (2)
+    // Supervisor (3) cannot manage Developer (1), Engineer (2), or other Supervisors (3)
+    if (user.role <= currentUser.role) return false
+
+    // Non-admins can only manage their direct children
+    return user.parent?._id === currentUser._id
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -302,7 +319,7 @@ export default function Users() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {u._id !== currentUser._id && (
+                      {canManageUser(u) && (
                         <div className="flex gap-1">
                           <Button
                             variant="ghost"
