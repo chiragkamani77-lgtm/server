@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fundsApi } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
 import {
   Select,
   SelectContent,
@@ -9,7 +10,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle, CheckCircle2, Info } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Info, Wallet } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 
 export function FundAllocationSelector({
@@ -20,62 +21,70 @@ export function FundAllocationSelector({
   label = "Fund Allocation",
   className = ""
 }) {
+  const { user } = useAuth()
   const [allocations, setAllocations] = useState([])
-  const [utilization, setUtilization] = useState(null)
+  const [walletBalance, setWalletBalance] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     fetchAllocations()
+    fetchWalletBalance()
   }, [])
 
   useEffect(() => {
-    if (value) {
-      fetchUtilization(value)
+    if (requestedAmount > 0 && walletBalance !== null) {
+      validateAmount()
     } else {
-      setUtilization(null)
+      setError(null)
     }
-  }, [value, requestedAmount])
+  }, [requestedAmount, walletBalance])
 
   const fetchAllocations = async () => {
     try {
       const response = await fundsApi.getAll({ status: 'disbursed', limit: 100 })
-      setAllocations(response.data.allocations || [])
+      const allAllocations = response.data.allocations || []
+
+      // Filter to show only allocations where current user is the recipient
+      const myAllocations = allAllocations.filter(a => a.toUser?._id === user?._id)
+
+      setAllocations(myAllocations)
     } catch (err) {
       console.error('Failed to fetch fund allocations:', err)
     }
   }
 
-  const fetchUtilization = async (allocationId) => {
-    if (!allocationId) return
-
+  const fetchWalletBalance = async () => {
     setLoading(true)
-    setError(null)
-
     try {
-      const data = await fundsApi.getUtilization(allocationId)
-      setUtilization(data.summary)
-
-      // Check if requested amount exceeds available balance
-      if (requestedAmount > 0 && data.summary.remainingBalance < requestedAmount) {
-        setError({
-          type: 'insufficient',
-          message: `Insufficient funds. Available: ${formatCurrency(data.summary.remainingBalance)}, Requested: ${formatCurrency(requestedAmount)}`
-        })
-      }
+      const response = await fundsApi.getWalletSummary()
+      setWalletBalance(response.data)
     } catch (err) {
-      console.error('Failed to fetch utilization:', err)
+      console.error('Failed to fetch wallet balance:', err)
       setError({
         type: 'error',
-        message: 'Failed to check fund availability'
+        message: 'Failed to check wallet balance'
       })
     } finally {
       setLoading(false)
     }
   }
 
+  const validateAmount = () => {
+    if (!walletBalance) return
+
+    if (requestedAmount > walletBalance.remainingBalance) {
+      setError({
+        type: 'insufficient',
+        message: `Insufficient wallet balance. Available: ${formatCurrency(walletBalance.remainingBalance)}, Requested: ${formatCurrency(requestedAmount)}`
+      })
+    } else {
+      setError(null)
+    }
+  }
+
   const hasError = error?.type === 'insufficient'
-  const hasSufficientFunds = utilization && requestedAmount > 0 && utilization.remainingBalance >= requestedAmount
+  const hasSufficientFunds = walletBalance && requestedAmount > 0 && walletBalance.remainingBalance >= requestedAmount
 
   return (
     <div className={`space-y-2 ${className}`}>
@@ -95,17 +104,17 @@ export function FundAllocationSelector({
         <SelectContent>
           {allocations.length === 0 && (
             <div className="p-2 text-sm text-muted-foreground text-center">
-              No disbursed fund allocations available
+              No fund allocations available. Please request funds first.
             </div>
           )}
           {allocations.map((allocation) => (
             <SelectItem key={allocation._id} value={allocation._id}>
               <div className="flex flex-col">
                 <span className="font-medium">
-                  {allocation.fromUser?.name} → {allocation.toUser?.name}
+                  From: {allocation.fromUser?.name}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {formatCurrency(allocation.amount)} - {allocation.purpose}
+                  {formatCurrency(allocation.amount)} - {new Date(allocation.allocationDate).toLocaleDateString()}
                 </span>
               </div>
             </SelectItem>
@@ -116,22 +125,27 @@ export function FundAllocationSelector({
       {loading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <div className="animate-spin h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full" />
-          <span>Checking fund availability...</span>
+          <span>Checking wallet balance...</span>
         </div>
       )}
 
-      {utilization && !loading && (
+      {walletBalance && !loading && (
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm p-3 bg-muted rounded-lg">
             <div>
-              <p className="font-medium">Fund Balance</p>
+              <p className="font-medium flex items-center gap-2">
+                <Wallet className="h-4 w-4" />
+                Your Wallet Balance
+              </p>
               <p className="text-xs text-muted-foreground">
-                Allocated: {formatCurrency(utilization.allocated)} |
-                Used: {formatCurrency(utilization.totalUtilized)} ({utilization.utilizationPercent}%)
+                Received: {formatCurrency(walletBalance.totalReceived)} |
+                Spent: {formatCurrency(walletBalance.totalSpent)}
               </p>
             </div>
             <div className="text-right">
-              <p className="font-bold text-lg">{formatCurrency(utilization.remainingBalance)}</p>
+              <p className={`font-bold text-lg ${walletBalance.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(walletBalance.remainingBalance)}
+              </p>
               <p className="text-xs text-muted-foreground">Available</p>
             </div>
           </div>
@@ -140,7 +154,7 @@ export function FundAllocationSelector({
             <Alert className="border-green-200 bg-green-50">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <AlertDescription className="text-green-800">
-                Sufficient funds available for this transaction
+                Sufficient funds available in your wallet
               </AlertDescription>
             </Alert>
           )}
@@ -158,7 +172,7 @@ export function FundAllocationSelector({
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            Fund allocation is required. All expenses and bills must be linked to a fund allocation.
+            Fund allocation is required for audit trail. Select the allocation this expense should be linked to.
           </AlertDescription>
         </Alert>
       )}

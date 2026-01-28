@@ -279,15 +279,15 @@ export default function Expenses() {
   const totalFiltered = expenses.reduce((sum, e) => sum + (e.amount || 0), 0)
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Expenses</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl md:text-3xl font-bold">Expenses</h1>
+          <p className="text-muted-foreground text-sm md:text-base">
             Track and manage all expenses
           </p>
         </div>
-        <Button onClick={() => setIsAddOpen(true)}>
+        <Button onClick={() => setIsAddOpen(true)} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           Add Expense
         </Button>
@@ -302,7 +302,7 @@ export default function Expenses() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-5">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
             <div className="space-y-2">
               <Label>Site</Label>
               <Select
@@ -390,8 +390,9 @@ export default function Expenses() {
       </div>
 
       {/* Table */}
-      <Card>
-        <Table>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
@@ -526,6 +527,7 @@ export default function Expenses() {
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Pagination */}
@@ -558,7 +560,7 @@ export default function Expenses() {
         setIsAddOpen(open)
         if (!open) resetForm()
       }}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSubmit}>
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit' : 'Add'} Expense</DialogTitle>
@@ -672,7 +674,7 @@ export default function Expenses() {
 
       {/* Approve/Pay Dialog - Developer Only */}
       <Dialog open={!!approveExpense} onOpenChange={(open) => !open && setApproveExpense(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleApprove}>
             <DialogHeader>
               <DialogTitle>
@@ -773,7 +775,7 @@ export default function Expenses() {
 
       {/* View Expense Dialog */}
       <Dialog open={!!viewExpense} onOpenChange={(open) => !open && setViewExpense(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               Expense Details

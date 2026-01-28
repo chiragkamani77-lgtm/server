@@ -149,7 +149,10 @@ export const fundsApi = {
   delete: (id) => api.delete(`/funds/${id}`),
   getMySummary: () => api.get('/funds/my-summary'),
   getUtilization: (id) => api.get(`/funds/${id}/utilization`),
-  getFlowSummary: () => api.get('/funds/flow/summary')
+  getFlowSummary: () => api.get('/funds/flow/summary'),
+  // Wallet-based system endpoints
+  getWalletSummary: (userId) => api.get('/funds/wallet/summary', { params: userId ? { userId } : {} }),
+  getInvestmentPoolSummary: () => api.get('/funds/investment-pool/summary')
 }
 
 // Bills API

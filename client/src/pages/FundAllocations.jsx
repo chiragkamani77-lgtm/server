@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { fundsApi, usersApi, sitesApi } from '@/lib/api'
+import { fundsApi, usersApi, sitesApi, investmentsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, ArrowRight, ArrowDown, Wallet, TrendingUp, Clock, ChevronLeft, ChevronRight, Check, X, Eye, Receipt, Users, Building2, Edit, Trash2 } from 'lucide-react'
+import { Plus, ArrowRight, ArrowDown, Wallet, TrendingUp, ChevronLeft, ChevronRight, Check, X, Eye, Receipt, Users, Building2, Edit, Trash2 } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,6 +75,9 @@ export default function FundAllocations() {
   const [deleteId, setDeleteId] = useState(null)
   const [selectedAllocation, setSelectedAllocation] = useState(null)
   const [utilizationData, setUtilizationData] = useState(null)
+  const [investmentSummary, setInvestmentSummary] = useState(null)
+  const [walletSummary, setWalletSummary] = useState(null)
+  const [investmentPool, setInvestmentPool] = useState(null)
 
   const [form, setForm] = useState({
     toUserId: '',
@@ -96,19 +99,27 @@ export default function FundAllocations() {
 
     try {
       setLoading(true)
-      const [allocationsRes, summaryRes, usersRes, sitesRes, flowRes] = await Promise.all([
+      const [allocationsRes, summaryRes, usersRes, sitesRes, flowRes, investmentRes, walletRes, poolRes] = await Promise.all([
         fundsApi.getAll({ page: pagination.page, limit: 20 }),
         fundsApi.getMySummary(),
         usersApi.getAll(),
         sitesApi.getAll(),
         isAdmin ? fundsApi.getFlowSummary() : Promise.resolve({ data: null }),
+        isAdmin ? investmentsApi.getSummary() : Promise.resolve({ data: null }),
+        fundsApi.getWalletSummary(),
+        isAdmin ? fundsApi.getInvestmentPoolSummary() : Promise.resolve({ data: null }),
       ])
       setAllocations(allocationsRes.data?.allocations || [])
       setPagination(allocationsRes.data?.pagination || { page: 1, pages: 1, total: 0 })
       setSummary(summaryRes.data)
-      setUsers((usersRes.data || []).filter(u => u._id !== user?._id))
+      // Developers can allocate to themselves (from investment pool)
+      // Engineers/Supervisors cannot allocate to themselves
+      setUsers((usersRes.data || []).filter(u => isAdmin ? true : u._id !== user?._id))
       setSites(sitesRes.data || [])
       if (flowRes.data) setFlowSummary(flowRes.data)
+      if (investmentRes.data) setInvestmentSummary(investmentRes.data)
+      if (walletRes.data) setWalletSummary(walletRes.data)
+      if (poolRes.data) setInvestmentPool(poolRes.data)
     } catch (error) {
       console.error('Fund allocations error:', error)
       toast({
@@ -234,18 +245,24 @@ export default function FundAllocations() {
 
   // Business rule: Determine if allocation can be edited
   const isAllocationEditable = (allocation) => {
-    if (!isAdmin && !isSupervisor) return false
-    // Only pending and approved allocations can be edited
-    // Disbursed and rejected are locked
-    return allocation.status === 'pending' || allocation.status === 'approved'
+    // Developers can edit any allocation
+    if (isAdmin) return true
+    // Supervisors can only edit pending and approved
+    if (isSupervisor) {
+      return allocation.status === 'pending' || allocation.status === 'approved'
+    }
+    return false
   }
 
   // Business rule: Determine if allocation can be deleted
   const isAllocationDeletable = (allocation) => {
-    if (!isAdmin && !isSupervisor) return false
-    // Only pending allocations can be deleted
-    // Once approved, disbursed, or rejected - cannot delete
-    return allocation.status === 'pending'
+    // Developers can delete any allocation
+    if (isAdmin) return true
+    // Supervisors can only delete pending allocations
+    if (isSupervisor) {
+      return allocation.status === 'pending'
+    }
+    return false
   }
 
   // Determine which fields can be edited based on status
@@ -260,66 +277,158 @@ export default function FundAllocations() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Fund Allocations</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl md:text-3xl font-bold">Fund Allocations</h1>
+          <p className="text-muted-foreground text-sm md:text-base">
             Track fund flow from developers to engineers and supervisors
           </p>
         </div>
         {(isAdmin || isSupervisor) && (
-          <Button onClick={() => { resetForm(); setIsAddOpen(true); }}>
+          <Button onClick={() => { resetForm(); setIsAddOpen(true); }} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
             Allocate Funds
           </Button>
         )}
       </div>
 
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid gap-4 md:grid-cols-4">
+      {/* Wallet Summary Cards - Investment-style Layout */}
+      {walletSummary && (
+        <>
+          {/* Top Summary Cards */}
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {isAdmin ? 'Investment Pool' : 'Wallet - Total Received'}
+                </CardTitle>
+                <Wallet className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">
+                  {isAdmin && investmentPool
+                    ? formatCurrency(investmentPool.totalInvestment || 0)
+                    : formatCurrency(walletSummary.totalReceived || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {isAdmin && investmentPool
+                    ? `Available: ${formatCurrency(investmentPool.availablePool || 0)}`
+                    : `${walletSummary.receivedCount || 0} allocations received`}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Spent</CardTitle>
+                <TrendingUp className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(walletSummary.totalSpent || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Expenses + Bills + Salaries
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Remaining Balance</CardTitle>
+                <Wallet className="h-4 w-4 text-purple-500" />
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${walletSummary.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatCurrency(walletSummary.remainingBalance || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">Available in wallet</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Fund Utilization Breakdown */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Funds Received</CardTitle>
-              <Wallet className="h-4 w-4 text-green-500" />
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Receipt className="h-5 w-5" />
+                Fund Utilization Breakdown
+              </CardTitle>
+              <CardDescription>How your wallet funds have been utilized</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">{formatCurrency(summary.received.total)}</div>
-              <p className="text-xs text-muted-foreground">{summary.received.count} transactions</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Funds Disbursed</CardTitle>
-              <TrendingUp className="h-4 w-4 text-blue-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{formatCurrency(summary.disbursed.total)}</div>
-              <p className="text-xs text-muted-foreground">{summary.disbursed.count} transactions</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Pending to Receive</CardTitle>
-              <Clock className="h-4 w-4 text-yellow-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-yellow-600">{formatCurrency(summary.pendingToReceive.total)}</div>
-              <p className="text-xs text-muted-foreground">{summary.pendingToReceive.count} pending</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Available Balance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(summary.balance)}
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+                {/* Site Expenses */}
+                <div className="p-4 border rounded-lg bg-orange-50 dark:bg-orange-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Building2 className="h-5 w-5 text-orange-500" />
+                    <span className="font-medium text-sm">Site Expenses</span>
+                  </div>
+                  <div className="text-2xl font-bold text-orange-600">
+                    {formatCurrency(walletSummary.breakdown?.expenses?.total || 0)}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {walletSummary.breakdown?.expenses?.count || 0} transactions
+                  </p>
+                </div>
+
+                {/* Material & GST Bills */}
+                <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Receipt className="h-5 w-5 text-blue-500" />
+                    <span className="font-medium text-sm">Material & GST Bills</span>
+                  </div>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {formatCurrency(walletSummary.breakdown?.bills?.total || 0)}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {walletSummary.breakdown?.bills?.count || 0} bills
+                  </p>
+                </div>
+
+                {/* Labor & Salaries */}
+                <div className="p-4 border rounded-lg bg-purple-50 dark:bg-purple-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users className="h-5 w-5 text-purple-500" />
+                    <span className="font-medium text-sm">Labor & Salaries</span>
+                  </div>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {formatCurrency(walletSummary.breakdown?.ledger?.net || 0)}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Credits: {formatCurrency(walletSummary.breakdown?.ledger?.credits || 0)} |
+                    Debits: {formatCurrency(walletSummary.breakdown?.ledger?.debits || 0)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Summary Bar */}
+              <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-2">
+                  <div className="text-center sm:text-left">
+                    <p className="text-sm text-muted-foreground">Total Received</p>
+                    <p className="text-xl font-bold text-green-600">
+                      {formatCurrency(walletSummary.totalReceived || 0)}
+                    </p>
+                  </div>
+                  <ArrowRight className="h-5 w-5 text-muted-foreground hidden sm:block" />
+                  <div className="text-center sm:text-left">
+                    <p className="text-sm text-muted-foreground">Total Spent</p>
+                    <p className="text-xl font-bold text-blue-600">
+                      {formatCurrency(walletSummary.totalSpent || 0)}
+                    </p>
+                  </div>
+                  <ArrowRight className="h-5 w-5 text-muted-foreground hidden sm:block" />
+                  <div className="text-center sm:text-left">
+                    <p className="text-sm text-muted-foreground">Remaining</p>
+                    <p className={`text-xl font-bold ${walletSummary.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatCurrency(walletSummary.remainingBalance || 0)}
+                    </p>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
-        </div>
+        </>
       )}
 
       {/* Fund Flow Summary (Admin Only) */}
@@ -343,9 +452,12 @@ export default function FundAllocations() {
                 <div className="text-2xl font-bold text-blue-600">
                   {formatCurrency(flowSummary.fundFlow?.developerToEngineer?.total || 0)}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {flowSummary.fundFlow?.developerToEngineer?.count || 0} allocations
-                </p>
+                {(flowSummary.fundFlow?.developerToEngineer?.recipients || []).map((r) => (
+                  <div key={r.toUser?._id} className="flex justify-between text-xs mt-1 text-muted-foreground">
+                    <span>{r.toUser?.name}</span>
+                    <span>{formatCurrency(r.total)}</span>
+                  </div>
+                ))}
               </div>
 
               {/* Engineer to Supervisor */}
@@ -357,9 +469,12 @@ export default function FundAllocations() {
                 <div className="text-2xl font-bold text-purple-600">
                   {formatCurrency(flowSummary.fundFlow?.engineerToSupervisor?.total || 0)}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {flowSummary.fundFlow?.engineerToSupervisor?.count || 0} allocations
-                </p>
+                {(flowSummary.fundFlow?.engineerToSupervisor?.recipients || []).map((r) => (
+                  <div key={r.toUser?._id} className="flex justify-between text-xs mt-1 text-muted-foreground">
+                    <span>{r.toUser?.name}</span>
+                    <span>{formatCurrency(r.total)}</span>
+                  </div>
+                ))}
               </div>
 
               {/* Developer to Supervisor */}
@@ -371,9 +486,12 @@ export default function FundAllocations() {
                 <div className="text-2xl font-bold text-green-600">
                   {formatCurrency(flowSummary.fundFlow?.developerToSupervisor?.total || 0)}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {flowSummary.fundFlow?.developerToSupervisor?.count || 0} allocations
-                </p>
+                {(flowSummary.fundFlow?.developerToSupervisor?.recipients || []).map((r) => (
+                  <div key={r.toUser?._id} className="flex justify-between text-xs mt-1 text-muted-foreground">
+                    <span>{r.toUser?.name}</span>
+                    <span>{formatCurrency(r.total)}</span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -419,7 +537,7 @@ export default function FundAllocations() {
       {/* Utilization Detail Dialog */}
       {selectedAllocation && utilizationData && (
         <Dialog open={!!selectedAllocation} onOpenChange={() => { setSelectedAllocation(null); setUtilizationData(null); }}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Fund Utilization Details</DialogTitle>
               <DialogDescription>
@@ -474,12 +592,13 @@ export default function FundAllocations() {
       )}
 
       {/* Allocations Table */}
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle>Fund Allocation History</CardTitle>
           <CardDescription>Showing {allocations.length} of {pagination.total} entries</CardDescription>
         </CardHeader>
-        <Table>
+        <div className="overflow-x-auto">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
@@ -595,6 +714,7 @@ export default function FundAllocations() {
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Pagination */}
@@ -622,7 +742,7 @@ export default function FundAllocations() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSubmit}>
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit Fund Allocation' : 'Allocate Funds'}</DialogTitle>

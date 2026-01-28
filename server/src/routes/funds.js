@@ -1,13 +1,15 @@
 import express from 'express';
-import { FundAllocation, User, Site, Expense, Bill, WorkerLedger } from '../models/index.js';
+import mongoose from 'mongoose';
+import { FundAllocation, User, Site, Expense, Bill, WorkerLedger, Investment } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Utility function to validate fund availability
+// Utility function to validate fund availability (LEGACY - for backward compatibility)
+// In wallet-based system, this validates wallet balance of the allocation's recipient
 async function validateFundAvailability(fundAllocationId, requestedAmount) {
   try {
-    // Get fund allocation
+    // Get fund allocation to identify the user
     const allocation = await FundAllocation.findById(fundAllocationId);
 
     if (!allocation) {
@@ -27,43 +29,19 @@ async function validateFundAvailability(fundAllocationId, requestedAmount) {
       };
     }
 
-    // Calculate current utilization
-    // Get expenses linked to this fund allocation
-    const expenses = await Expense.find({ fundAllocation: allocation._id });
-    const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-
-    // Get bills linked to this fund allocation
-    const bills = await Bill.find({ fundAllocation: allocation._id });
-    const totalBills = bills.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
-
-    // Get worker ledger entries linked to this fund allocation
-    const ledgerEntries = await WorkerLedger.find({ fundAllocation: allocation._id });
-    const ledgerCredits = ledgerEntries.filter(e => e.type === 'credit').reduce((sum, e) => sum + e.amount, 0);
-    const ledgerDebits = ledgerEntries.filter(e => e.type === 'debit').reduce((sum, e) => sum + e.amount, 0);
-
-    // Get sub-allocations (funds passed down to others)
-    const subAllocations = await FundAllocation.find({
-      organization: allocation.organization,
-      fromUser: allocation.toUser,
-      status: 'disbursed'
-    });
-    const totalSubAllocated = subAllocations.reduce((sum, a) => sum + a.amount, 0);
-
-    // Calculate remaining balance
-    const totalUtilized = totalExpenses + totalBills + (ledgerCredits - ledgerDebits) + totalSubAllocated;
-    const remainingBalance = allocation.amount - totalUtilized;
-
-    // Check if requested amount is available
-    const available = requestedAmount <= remainingBalance;
+    // Use wallet-based validation for the allocation's recipient
+    const walletCheck = await validateWalletBalance(
+      allocation.toUser,
+      requestedAmount,
+      allocation.organization
+    );
 
     return {
-      available,
-      balance: remainingBalance,
-      allocated: allocation.amount,
-      utilized: totalUtilized,
-      message: available
-        ? 'Sufficient funds available'
-        : `Insufficient funds. Available: ${remainingBalance.toFixed(2)}, Requested: ${requestedAmount.toFixed(2)}`
+      available: walletCheck.available,
+      balance: walletCheck.balance,
+      allocated: walletCheck.totalReceived,
+      utilized: walletCheck.totalSpent,
+      message: walletCheck.message
     };
   } catch (error) {
     return {
@@ -74,8 +52,192 @@ async function validateFundAvailability(fundAllocationId, requestedAmount) {
   }
 }
 
+// Utility function to validate investment pool availability
+async function validateInvestmentPool(requestedAmount, organization) {
+  try {
+    // Convert to ObjectId for consistent comparison
+    // Always convert to ensure proper format for aggregation queries
+    const orgId = mongoose.Types.ObjectId.createFromHexString(organization.toString());
+
+    // Get total investment
+    const investments = await Investment.find({ organization: orgId });
+    const totalInvestment = investments.reduce((sum, inv) => sum + inv.amount, 0);
+
+    // Get total allocated (disbursed) funds
+    const allocatedAgg = await FundAllocation.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          status: 'disbursed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAllocated: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalAllocated = allocatedAgg[0]?.totalAllocated || 0;
+    const availablePool = totalInvestment - totalAllocated;
+    const available = requestedAmount <= availablePool;
+
+    return {
+      available,
+      totalInvestment,
+      totalAllocated,
+      availablePool,
+      message: available
+        ? 'Sufficient funds in investment pool'
+        : `Insufficient funds in investment pool. Available: ${availablePool.toFixed(2)}, Requested: ${requestedAmount.toFixed(2)}`
+    };
+  } catch (error) {
+    return {
+      available: false,
+      totalInvestment: 0,
+      totalAllocated: 0,
+      availablePool: 0,
+      message: `Error validating investment pool: ${error.message}`
+    };
+  }
+}
+
+// Utility function to validate wallet balance
+async function validateWalletBalance(userId, requestedAmount, organization) {
+  try {
+    // Convert to ObjectId for consistent comparison
+    // Always convert to ensure proper format for aggregation queries
+    const orgId = mongoose.Types.ObjectId.createFromHexString(organization.toString());
+    const userObjId = mongoose.Types.ObjectId.createFromHexString(userId.toString());
+
+    // Get total received (wallet credits)
+    const receivedAgg = await FundAllocation.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          toUser: userObjId,
+          status: 'disbursed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalReceived: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalReceived = receivedAgg[0]?.totalReceived || 0;
+
+    // Get total expenses
+    const expensesAgg = await Expense.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          user: userObjId
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalExpenses: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalExpenses = expensesAgg[0]?.totalExpenses || 0;
+
+    // Get total bills
+    const billsAgg = await Bill.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          createdBy: userObjId,
+          status: { $in: ['credited', 'paid'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalBills: { $sum: '$totalAmount' }
+        }
+      }
+    ]);
+
+    const totalBills = billsAgg[0]?.totalBills || 0;
+
+    // Get ledger entries
+    const userAllocations = await FundAllocation.find({
+      organization: orgId,
+      toUser: userObjId,
+      status: 'disbursed'
+    }).select('_id');
+
+    const allocationIds = userAllocations.map(a => a._id);
+
+    const ledgerAgg = await WorkerLedger.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          fundAllocation: { $in: allocationIds }
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const ledgerCredits = ledgerAgg.find(l => l._id === 'credit')?.total || 0;
+    const ledgerDebits = ledgerAgg.find(l => l._id === 'debit')?.total || 0;
+    const netLedger = ledgerCredits - ledgerDebits;
+
+    // Get sub-allocations (funds passed down to others)
+    const subAllocationsAgg = await FundAllocation.aggregate([
+      {
+        $match: {
+          organization: orgId,
+          fromUser: userObjId,
+          status: 'disbursed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalSubAllocated: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalSubAllocated = subAllocationsAgg[0]?.totalSubAllocated || 0;
+
+    const totalSpent = totalExpenses + totalBills + netLedger + totalSubAllocated;
+    const balance = totalReceived - totalSpent;
+    const available = requestedAmount <= balance;
+
+    return {
+      available,
+      balance,
+      totalReceived,
+      totalSpent,
+      message: available
+        ? 'Sufficient wallet balance'
+        : `Insufficient wallet balance. Available: ${balance.toFixed(2)}, Requested: ${requestedAmount.toFixed(2)}`
+    };
+  } catch (error) {
+    return {
+      available: false,
+      balance: 0,
+      message: `Error validating wallet balance: ${error.message}`
+    };
+  }
+}
+
 // Export for use in other routes
-export { validateFundAvailability };
+export { validateFundAvailability, validateInvestmentPool, validateWalletBalance };
 
 // Get fund allocations (filtered by user role)
 router.get('/', authenticate, async (req, res) => {
@@ -207,6 +369,159 @@ router.get('/my-summary', authenticate, async (req, res) => {
   }
 });
 
+// Get investment pool summary (Admin only)
+router.get('/investment-pool/summary', authenticate, requireRole(1), async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const poolCheck = await validateInvestmentPool(0, req.user.organization);
+
+    res.json({
+      totalInvestment: poolCheck.totalInvestment,
+      totalAllocated: poolCheck.totalAllocated,
+      availablePool: poolCheck.availablePool
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get wallet summary for user (wallet-based system)
+router.get('/wallet/summary', authenticate, async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const userId = req.query.userId && req.user.role === 1
+      ? mongoose.Types.ObjectId.createFromHexString(req.query.userId)
+      : req.user._id;
+
+    // Total received (credited to wallet from Investment)
+    const receivedAgg = await FundAllocation.aggregate([
+      {
+        $match: {
+          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          toUser: userId,
+          status: 'disbursed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalReceived: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const totalReceived = receivedAgg[0]?.totalReceived || 0;
+    const receivedCount = receivedAgg[0]?.count || 0;
+
+    // Total expenses by this user
+    const expensesAgg = await Expense.aggregate([
+      {
+        $match: {
+          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          user: userId
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalExpenses: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const totalExpenses = expensesAgg[0]?.totalExpenses || 0;
+    const expenseCount = expensesAgg[0]?.count || 0;
+
+    // Total bills created by this user (credited/paid status)
+    const billsAgg = await Bill.aggregate([
+      {
+        $match: {
+          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          createdBy: userId,
+          status: { $in: ['credited', 'paid'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalBills: { $sum: '$totalAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const totalBills = billsAgg[0]?.totalBills || 0;
+    const billCount = billsAgg[0]?.count || 0;
+
+    // Worker ledger entries linked to this user's fund allocations
+    const userAllocations = await FundAllocation.find({
+      organization: req.user.organization,
+      toUser: userId,
+      status: 'disbursed'
+    }).select('_id');
+
+    const allocationIds = userAllocations.map(a => a._id);
+
+    const ledgerAgg = await WorkerLedger.aggregate([
+      {
+        $match: {
+          organization: mongoose.Types.ObjectId.createFromHexString(req.user.organization.toString()),
+          fundAllocation: { $in: allocationIds }
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const ledgerCredits = ledgerAgg.find(l => l._id === 'credit')?.total || 0;
+    const ledgerDebits = ledgerAgg.find(l => l._id === 'debit')?.total || 0;
+    const netLedger = ledgerCredits - ledgerDebits;
+    const ledgerCount = ledgerAgg.reduce((sum, l) => sum + l.count, 0);
+
+    // Calculate totals
+    const totalSpent = totalExpenses + totalBills + netLedger;
+    const remainingBalance = totalReceived - totalSpent;
+
+    res.json({
+      totalReceived,
+      receivedCount,
+      breakdown: {
+        expenses: {
+          total: totalExpenses,
+          count: expenseCount
+        },
+        bills: {
+          total: totalBills,
+          count: billCount
+        },
+        ledger: {
+          credits: ledgerCredits,
+          debits: ledgerDebits,
+          net: netLedger,
+          count: ledgerCount
+        }
+      },
+      totalSpent,
+      remainingBalance
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get fund utilization for a specific allocation
 router.get('/:id/utilization', authenticate, async (req, res) => {
   try {
@@ -318,6 +633,21 @@ router.get('/flow/summary', authenticate, async (req, res) => {
     const engineerToSupervisor = allocations.filter(a => a.fromUser?.role === 2 && a.toUser?.role === 3);
     const developerToSupervisor = allocations.filter(a => a.fromUser?.role === 1 && a.toUser?.role === 3);
 
+    // Group allocations by recipient
+    const groupByRecipient = (allocs) => {
+      const grouped = {};
+      allocs.forEach(a => {
+        const key = a.toUser?._id?.toString();
+        if (!key) return;
+        if (!grouped[key]) {
+          grouped[key] = { toUser: a.toUser, fromUser: a.fromUser, total: 0, count: 0 };
+        }
+        grouped[key].total += a.amount;
+        grouped[key].count += 1;
+      });
+      return Object.values(grouped);
+    };
+
     // Get total utilized from each category
     const expenseTotal = await Expense.aggregate([
       { $match: { organization: req.user.organization } },
@@ -348,17 +678,17 @@ router.get('/flow/summary', authenticate, async (req, res) => {
         developerToEngineer: {
           total: developerToEngineer.reduce((sum, a) => sum + a.amount, 0),
           count: developerToEngineer.length,
-          allocations: developerToEngineer
+          recipients: groupByRecipient(developerToEngineer)
         },
         engineerToSupervisor: {
           total: engineerToSupervisor.reduce((sum, a) => sum + a.amount, 0),
           count: engineerToSupervisor.length,
-          allocations: engineerToSupervisor
+          recipients: groupByRecipient(engineerToSupervisor)
         },
         developerToSupervisor: {
           total: developerToSupervisor.reduce((sum, a) => sum + a.amount, 0),
           count: developerToSupervisor.length,
-          allocations: developerToSupervisor
+          recipients: groupByRecipient(developerToSupervisor)
         }
       },
       utilization: {
@@ -400,11 +730,39 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(404).json({ message: 'Recipient not found' });
     }
 
-    // For Level 2, can only allocate to their children
+    // For Level 2, check wallet balance and prevent self-allocation
     if (req.user.role === 2) {
+      // Level 2 cannot allocate to themselves
+      if (toUserId === req.user._id.toString()) {
+        return res.status(400).json({ message: 'Cannot allocate funds to yourself. Only developers can allocate from investment pool.' });
+      }
+
+      // Check team member relationship
       const childIds = await req.user.getChildIds();
       if (!childIds.some(id => id.toString() === toUserId)) {
         return res.status(403).json({ message: 'Can only allocate funds to your team members' });
+      }
+
+      // Validate wallet balance
+      const walletCheck = await validateWalletBalance(req.user._id, amount, req.user.organization);
+      if (!walletCheck.available) {
+        return res.status(400).json({
+          message: walletCheck.message,
+          walletBalance: walletCheck.balance
+        });
+      }
+    }
+
+    // For Level 1 (Developer), validate against investment pool
+    if (req.user.role === 1) {
+      const poolCheck = await validateInvestmentPool(amount, req.user.organization);
+      if (!poolCheck.available) {
+        return res.status(400).json({
+          message: poolCheck.message,
+          investmentPool: poolCheck.totalInvestment,
+          alreadyAllocated: poolCheck.totalAllocated,
+          availablePool: poolCheck.availablePool
+        });
       }
     }
 
@@ -516,7 +874,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// Delete allocation (Level 1 only, and only pending)
+// Delete allocation (Developer can delete any allocation)
 router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
   try {
     const allocation = await FundAllocation.findById(req.params.id);
@@ -529,9 +887,7 @@ router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    if (allocation.status !== 'pending') {
-      return res.status(400).json({ message: 'Can only delete pending allocations' });
-    }
+    // Developers can delete any allocation regardless of status
 
     await allocation.deleteOne();
 

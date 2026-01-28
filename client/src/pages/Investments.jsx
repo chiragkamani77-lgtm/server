@@ -184,15 +184,15 @@ export default function Investments() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Partner Investments</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl md:text-3xl font-bold">Partner Investments</h1>
+          <p className="text-muted-foreground text-sm md:text-base">
             Track partner contributions and fund usage
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setIsAddOpen(true); }}>
+        <Button onClick={() => { resetForm(); setIsAddOpen(true); }} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           Add Investment
         </Button>
@@ -202,7 +202,7 @@ export default function Investments() {
       {summary && (
         <>
           {/* Main Summary Row */}
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Invested</CardTitle>
@@ -264,7 +264,7 @@ export default function Investments() {
               <CardDescription>How invested funds are being utilized</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
                 {/* Site Expenses */}
                 <div className="p-4 border rounded-lg bg-orange-50 dark:bg-orange-950">
                   <div className="flex items-center gap-2 mb-2">
@@ -344,7 +344,7 @@ export default function Investments() {
               {summary.bills?.byType?.length > 0 && (
                 <div className="mt-4">
                   <h4 className="font-medium mb-2">Bills by Category</h4>
-                  <div className="grid gap-2 md:grid-cols-3">
+                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
                     {summary.bills.byType.map((item) => (
                       <div key={item._id} className="flex justify-between p-2 border rounded text-sm">
                         <span className="capitalize">{item._id}</span>
@@ -359,7 +359,7 @@ export default function Investments() {
               {summary.workerLedger?.byCategory?.length > 0 && (
                 <div className="mt-4">
                   <h4 className="font-medium mb-2">Labor Costs by Category</h4>
-                  <div className="grid gap-2 md:grid-cols-3">
+                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
                     {summary.workerLedger.byCategory.map((item) => (
                       <div key={item._id} className="flex justify-between p-2 border rounded text-sm">
                         <span className="capitalize">{item._id}</span>
@@ -383,7 +383,7 @@ export default function Investments() {
             <CardTitle>Investment by Partner</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
               {summary.partnerInvestments.map((item) => (
                 <div key={item.partner?._id} className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
@@ -404,12 +404,13 @@ export default function Investments() {
       )}
 
       {/* Investments Table */}
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
           <CardTitle>Investment History</CardTitle>
           <CardDescription>Showing {investments.length} of {pagination.total} entries</CardDescription>
         </CardHeader>
-        <Table>
+        <div className="overflow-x-auto">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
@@ -464,6 +465,7 @@ export default function Investments() {
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Pagination */}
@@ -491,7 +493,7 @@ export default function Investments() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleSubmit}>
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit' : 'Add'} Investment</DialogTitle>
