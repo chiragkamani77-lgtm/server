@@ -80,6 +80,7 @@ router.get('/', authenticate, async (req, res) => {
       .populate('category', 'name')
       .populate('user', 'name email')
       .populate('approvedBy', 'name')
+      .populate('fundAllocation', 'amount purpose fromUser toUser')
       .sort({ expenseDate: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));

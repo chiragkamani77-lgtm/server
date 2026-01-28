@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
-import { sitesApi, expensesApi, usersApi, categoriesApi } from '@/lib/api'
+import { sitesApi, expensesApi, usersApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -20,73 +17,70 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
-import { formatCurrency, formatDate, STATUS_COLORS, ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
-import { ArrowLeft, Plus, Trash2, Upload, UserPlus, X } from 'lucide-react'
+import { useExpensePermissions } from '@/hooks/useExpensePermissions'
+import { ExpenseTable, ExpenseForm, ExpenseFilters } from '@/components/expenses'
+import { formatCurrency, STATUS_COLORS, ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
+import { ArrowLeft, Plus, UserPlus, X } from 'lucide-react'
 
 export default function SiteDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user, isAdmin, canManageUsers } = useAuth()
+  const { canManageUsers } = useAuth()
+  const permissions = useExpensePermissions()
   const { toast } = useToast()
 
   const [site, setSite] = useState(null)
   const [expenses, setExpenses] = useState([])
-  const [categories, setCategories] = useState([])
   const [users, setUsers] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [expensesLoading, setExpensesLoading] = useState(false)
 
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
   const [isAssignUserOpen, setIsAssignUserOpen] = useState(false)
-  const [selectedFile, setSelectedFile] = useState(null)
 
-  const [expenseForm, setExpenseForm] = useState({
-    categoryId: '',
-    amount: '',
-    description: '',
-    vendorName: '',
-    expenseDate: new Date().toISOString().split('T')[0],
+  const [expenseFilters, setExpenseFilters] = useState({
+    category: '',
+    startDate: '',
+    endDate: '',
   })
 
   useEffect(() => {
-    fetchData()
+    fetchSiteData()
   }, [id])
 
-  const fetchData = async () => {
+  useEffect(() => {
+    if (site) {
+      fetchExpenses()
+    }
+  }, [site, expenseFilters])
+
+  const fetchSiteData = async () => {
+    setLoading(true)
     try {
-      const [siteRes, expensesRes, categoriesRes, summaryRes] = await Promise.all([
+      const [siteRes, summaryRes] = await Promise.all([
         sitesApi.getOne(id),
-        expensesApi.getAll({ siteId: id }),
-        categoriesApi.getAll(),
         expensesApi.getSummary(id),
       ])
 
       setSite(siteRes.data)
-      setExpenses(expensesRes.data.expenses)
-      setCategories(categoriesRes.data)
       setSummary(summaryRes.data)
 
       if (canManageUsers) {
         const usersRes = await usersApi.getAll()
-        setUsers(usersRes.data)
+        // Backend returns array directly
+        setUsers(Array.isArray(usersRes.data) ? usersRes.data : [])
       }
     } catch (error) {
+      console.error('Error loading site:', error)
       toast({
         title: 'Error',
-        description: 'Failed to load site details',
+        description: error.response?.data?.message || 'Failed to load site details',
         variant: 'destructive',
       })
       navigate('/sites')
@@ -95,55 +89,41 @@ export default function SiteDetail() {
     }
   }
 
-  const handleAddExpense = async (e) => {
-    e.preventDefault()
+  const fetchExpenses = async () => {
+    setExpensesLoading(true)
     try {
-      const { data } = await expensesApi.create({
+      const params = {
         siteId: id,
-        categoryId: expenseForm.categoryId,
-        amount: parseFloat(expenseForm.amount),
-        description: expenseForm.description,
-        vendorName: expenseForm.vendorName,
-        expenseDate: expenseForm.expenseDate,
-      })
-
-      // Upload receipt if selected
-      if (selectedFile) {
-        await expensesApi.uploadReceipt(data._id, selectedFile)
+        ...expenseFilters,
       }
 
-      toast({ title: 'Expense added successfully' })
-      setIsAddExpenseOpen(false)
-      setExpenseForm({
-        categoryId: '',
-        amount: '',
-        description: '',
-        vendorName: '',
-        expenseDate: new Date().toISOString().split('T')[0],
+      // Remove empty filters
+      Object.keys(params).forEach((key) => {
+        if (!params[key]) delete params[key]
       })
-      setSelectedFile(null)
-      fetchData()
+
+      const expensesRes = await expensesApi.getAll(params)
+      setExpenses(expensesRes.data?.expenses || [])
     } catch (error) {
+      console.error('Error loading expenses:', error)
       toast({
         title: 'Error',
-        description: error.response?.data?.message || 'Failed to add expense',
+        description: error.response?.data?.message || 'Failed to load expenses',
         variant: 'destructive',
       })
+    } finally {
+      setExpensesLoading(false)
     }
   }
 
-  const handleDeleteExpense = async (expenseId) => {
-    try {
-      await expensesApi.delete(expenseId)
-      toast({ title: 'Expense deleted' })
-      fetchData()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete expense',
-        variant: 'destructive',
-      })
-    }
+  const handleAddExpenseSuccess = () => {
+    setIsAddExpenseOpen(false)
+    fetchExpenses()
+    fetchSiteData() // Refresh summary
+    toast({
+      title: 'Success',
+      description: 'Expense added successfully.',
+    })
   }
 
   const handleAssignUser = async (userId) => {
@@ -151,7 +131,7 @@ export default function SiteDetail() {
       await sitesApi.assign(id, userId)
       toast({ title: 'User assigned successfully' })
       setIsAssignUserOpen(false)
-      fetchData()
+      fetchSiteData()
     } catch (error) {
       toast({
         title: 'Error',
@@ -165,7 +145,7 @@ export default function SiteDetail() {
     try {
       await sitesApi.unassign(id, userId)
       toast({ title: 'User removed from site' })
-      fetchData()
+      fetchSiteData()
     } catch (error) {
       toast({
         title: 'Error',
@@ -186,7 +166,7 @@ export default function SiteDetail() {
   if (!site) return null
 
   const availableUsers = users.filter(
-    u => !site.assignedUsers?.some(au => au._id === u._id)
+    (u) => !site.assignedUsers?.some((au) => au._id === u._id)
   )
 
   return (
@@ -203,9 +183,7 @@ export default function SiteDetail() {
               {site.status.replace('_', ' ')}
             </Badge>
           </div>
-          {site.address && (
-            <p className="text-muted-foreground">{site.address}</p>
-          )}
+          {site.address && <p className="text-muted-foreground">{site.address}</p>}
         </div>
       </div>
 
@@ -247,77 +225,42 @@ export default function SiteDetail() {
           <TabsTrigger value="summary">Summary</TabsTrigger>
         </TabsList>
 
-        {/* Expenses Tab */}
+        {/* Expenses Tab - Using Reusable Components */}
         <TabsContent value="expenses" className="space-y-4">
-          <div className="flex justify-end">
-            <Button onClick={() => setIsAddExpenseOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Expense
-            </Button>
-          </div>
+          {/* Add Expense Button */}
+          {permissions.canCreate && (
+            <div className="flex justify-end">
+              <Button onClick={() => setIsAddExpenseOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Expense
+              </Button>
+            </div>
+          )}
 
+          {/* Expense Filters */}
+          <ExpenseFilters
+            filters={expenseFilters}
+            onChange={setExpenseFilters}
+            onClear={() =>
+              setExpenseFilters({
+                category: '',
+                startDate: '',
+                endDate: '',
+              })
+            }
+            hideSiteFilter={true}
+          />
+
+          {/* Expense Table */}
           <Card>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead>Added By</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {expenses.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                      No expenses recorded yet
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  expenses.map((expense) => (
-                    <TableRow key={expense._id}>
-                      <TableCell>{formatDate(expense.expenseDate)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{expense.category?.name}</Badge>
-                      </TableCell>
-                      <TableCell>{expense.description || '-'}</TableCell>
-                      <TableCell>{expense.vendorName || '-'}</TableCell>
-                      <TableCell>{expense.user?.name}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(expense.amount)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          {expense.receiptPath && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              asChild
-                            >
-                              <a href={expense.receiptPath} target="_blank" rel="noopener noreferrer">
-                                <Upload className="h-4 w-4" />
-                              </a>
-                            </Button>
-                          )}
-                          {(isAdmin || expense.user?._id === user?._id) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteExpense(expense._id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+            <CardContent className="pt-6">
+              <ExpenseTable
+                expenses={expenses}
+                loading={expensesLoading}
+                onRefresh={fetchExpenses}
+                showSiteColumn={false}
+              />
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -338,13 +281,16 @@ export default function SiteDetail() {
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {site.assignedUsers?.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground py-8"
+                      >
                         No users assigned
                       </TableCell>
                     </TableRow>
@@ -358,11 +304,12 @@ export default function SiteDetail() {
                             {ROLE_NAMES[u.role]}
                           </Badge>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-right">
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => handleUnassignUser(u._id)}
+                            title="Remove from site"
                           >
                             <X className="h-4 w-4 text-destructive" />
                           </Button>
@@ -384,102 +331,39 @@ export default function SiteDetail() {
               <CardDescription>Expenses by category</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {summary?.categoryBreakdown?.map((cat) => (
-                  <div key={cat._id} className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{cat.category}</p>
-                      <p className="text-sm text-muted-foreground">{cat.count} entries</p>
+              {summary?.categoryBreakdown?.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No expense data available
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {summary?.categoryBreakdown?.map((cat) => (
+                    <div key={cat._id} className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{cat.category}</p>
+                        <p className="text-sm text-muted-foreground">{cat.count} entries</p>
+                      </div>
+                      <p className="font-bold">{formatCurrency(cat.total)}</p>
                     </div>
-                    <p className="font-bold">{formatCurrency(cat.total)}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      {/* Add Expense Dialog */}
+      {/* Add Expense Dialog - Using Reusable Form */}
       <Dialog open={isAddExpenseOpen} onOpenChange={setIsAddExpenseOpen}>
-        <DialogContent>
-          <form onSubmit={handleAddExpense}>
-            <DialogHeader>
-              <DialogTitle>Add Expense</DialogTitle>
-              <DialogDescription>
-                Record a new expense for {site.name}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Category</Label>
-                <Select
-                  value={expenseForm.categoryId}
-                  onValueChange={(value) => setExpenseForm({ ...expenseForm, categoryId: value })}
-                  required
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat._id} value={cat._id}>
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Amount (Rs.)</Label>
-                <Input
-                  type="number"
-                  value={expenseForm.amount}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
-                  placeholder="5000"
-                  required
-                  min="0"
-                  step="0.01"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={expenseForm.description}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
-                  placeholder="Cement purchase - 50 bags"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Vendor Name</Label>
-                <Input
-                  value={expenseForm.vendorName}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, vendorName: e.target.value })}
-                  placeholder="ABC Suppliers"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={expenseForm.expenseDate}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, expenseDate: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Receipt (optional)</Label>
-                <Input
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="submit">Add Expense</Button>
-            </DialogFooter>
-          </form>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Expense to {site.name}</DialogTitle>
+          </DialogHeader>
+          <ExpenseForm
+            siteId={id}
+            onSuccess={handleAddExpenseSuccess}
+            onCancel={() => setIsAddExpenseOpen(false)}
+          />
         </DialogContent>
       </Dialog>
 
@@ -488,9 +372,7 @@ export default function SiteDetail() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Assign User to Site</DialogTitle>
-            <DialogDescription>
-              Select a user to assign to {site.name}
-            </DialogDescription>
+            <DialogDescription>Select a user to assign to {site.name}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-4">
             {availableUsers.length === 0 ? (
@@ -508,9 +390,7 @@ export default function SiteDetail() {
                     <p className="font-medium">{u.name}</p>
                     <p className="text-sm text-muted-foreground">{u.email}</p>
                   </div>
-                  <Badge className={ROLE_COLORS[u.role]}>
-                    {ROLE_NAMES[u.role]}
-                  </Badge>
+                  <Badge className={ROLE_COLORS[u.role]}>{ROLE_NAMES[u.role]}</Badge>
                 </div>
               ))
             )}
