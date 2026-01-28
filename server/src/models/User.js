@@ -61,13 +61,31 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 };
 
 // Get all child user IDs (recursive)
-userSchema.methods.getChildIds = async function() {
-  const children = await User.find({ parent: this._id });
+userSchema.methods.getChildIds = async function(
+    roles = [],      // [2, 3] → only these roles
+  siteId = null   // only users assigned to this site
+) {
+ const match = {
+    parent: this._id
+  };
+
+  // Role filter
+  if (roles.length) {
+    match.role = { $in: roles };
+  }
+
+  // Site filter (if you store assigned sites on user)
+  if (siteId) {
+    match.assignedSites = siteId;
+  }
+
+  const children = await User.find(match).select('_id role');
+
   let allChildIds = children.map(c => c._id);
 
   for (const child of children) {
-    const grandChildren = await child.getChildIds();
-    allChildIds = [...allChildIds, ...grandChildren];
+    const grandChildren = await child.getChildIds({ roles, siteId });
+    allChildIds = allChildIds.concat(grandChildren);
   }
 
   return allChildIds;

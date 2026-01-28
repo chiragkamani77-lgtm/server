@@ -114,7 +114,7 @@ export default function FundAllocations() {
       setSummary(summaryRes.data)
       // Developers can allocate to themselves (from investment pool)
       // Engineers/Supervisors cannot allocate to themselves
-      setUsers((usersRes.data || []).filter(u => isAdmin ? true : u._id !== user?._id))
+      setUsers((usersRes.data || []).filter(u => isAdmin ? true : u._id !== user?._id).filter(u=>  u.role !== 4))
       setSites(sitesRes.data || [])
       if (flowRes.data) setFlowSummary(flowRes.data)
       if (investmentRes.data) setInvestmentSummary(investmentRes.data)
@@ -783,13 +783,24 @@ export default function FundAllocations() {
                     <SelectValue placeholder="Select recipient" />
                   </SelectTrigger>
                   <SelectContent>
-                    {users.map((u) => (
-                      <SelectItem key={u._id} value={u._id}>
-                        {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : u.role === 3 ? 'Supervisor' : 'Worker'})
-                      </SelectItem>
-                    ))}
+                    {users.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">
+                        No team members available. {!isAdmin && 'Please create team members first.'}
+                      </div>
+                    ) : (
+                      users.map((u) => (
+                        <SelectItem key={u._id} value={u._id}>
+                          {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : u.role === 3 ? 'Supervisor' : 'Worker'})
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
+                {!isAdmin && users.length === 0 && (
+                  <p className="text-sm text-yellow-600 mt-1">
+                    You need to create team members (supervisors/workers) before allocating funds. Go to Users page to add team members.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Site (Optional)</Label>
@@ -806,13 +817,24 @@ export default function FundAllocations() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map((site) => (
-                      <SelectItem key={site._id} value={site._id}>
-                        {site.name}
-                      </SelectItem>
-                    ))}
+                    {sites.length === 0 && !isAdmin ? (
+                      <div className="p-2 text-sm text-muted-foreground">
+                        No sites assigned. Contact admin to assign sites.
+                      </div>
+                    ) : (
+                      sites.map((site) => (
+                        <SelectItem key={site._id} value={site._id}>
+                          {site.name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
+                {!isAdmin && sites.length === 0 && (
+                  <p className="text-sm text-blue-600 mt-1">
+                    You don't have access to any sites yet. Ask a developer to assign you to sites.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Amount (Rs.)</Label>

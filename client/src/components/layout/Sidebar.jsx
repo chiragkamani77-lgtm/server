@@ -22,19 +22,19 @@ const navItems = [
     title: 'Dashboard',
     href: '/',
     icon: LayoutDashboard,
-    roles: [1, 2, 3],
+    roles: [1, 2, 3, 4],
   },
   {
     title: 'Sites',
     href: '/sites',
     icon: Building,
-    roles: [1, 2, 3],
+    roles: [1, 2, 3, 4],
   },
   {
     title: 'Expenses',
     href: '/expenses',
     icon: Receipt,
-    roles: [1, 2, 3],
+    roles: [1, 2, 3, 4],
   },
   {
     title: 'Investments',
@@ -46,7 +46,7 @@ const navItems = [
     title: 'Fund Allocations',
     href: '/funds',
     icon: Banknote,
-    roles: [1, 2],
+    roles: [1, 2, 3],
   },
   {
     title: 'GST Bills',
@@ -70,7 +70,7 @@ const navItems = [
     title: 'Users',
     href: '/users',
     icon: Users,
-    roles: [1, 2],
+    roles: [1, 2, 3],
   },
   {
     title: 'Reports',

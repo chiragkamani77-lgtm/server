@@ -17,10 +17,23 @@ const getVisibilityFilter = async (user, siteId) => {
   switch (user.role) {
     case 1: // Developer - sees all expenses
       break;
-    case 2: // Supervisor - sees own + children's expenses
-      const childIds = await user.getChildIds();
-      filter.user = { $in: [user._id, ...childIds] };
-      break;
+    case 2: { // Engineer
+      const childIds = await user.getChildIds({
+    roles: [3],      // workers only
+    siteId
+  });
+
+  const parentId = user.parent;
+
+  filter.user = {
+    $in: [
+      user._id,
+      ...childIds,
+      ...(parentId ? [parentId] : [])
+    ]
+  };
+  break;
+    }
     case 3: // Worker - sees only own expenses
       filter.user = user._id;
       break;

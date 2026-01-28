@@ -30,7 +30,7 @@ import { ArrowLeft, Plus, UserPlus, X } from 'lucide-react'
 export default function SiteDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { canManageUsers } = useAuth()
+  const { canManageUsers, isAdmin, user: currentUser } = useAuth()
   const permissions = useExpensePermissions()
   const { toast } = useToast()
 
@@ -165,9 +165,47 @@ export default function SiteDetail() {
 
   if (!site) return null
 
-  const availableUsers = users.filter(
-    (u) => !site.assignedUsers?.some((au) => au._id === u._id)
-  )
+  // Check if current user can remove a specific user from site
+  const canRemoveUser = (user) => {
+    // Developers can remove anyone
+    if (isAdmin) return true
+
+    // Engineers (role 2) can remove any supervisor or worker
+    if (currentUser.role === 2) {
+      return user.role === 3 || user.role === 4
+    }
+
+    // Supervisors (role 3) can remove any worker (role 4)
+    if (currentUser.role === 3) {
+      return user.role === 4
+    }
+
+    return false
+  }
+
+  // Filter users based on role for assignment
+  const getAvailableUsersForAssignment = () => {
+    const unassignedUsers = users.filter(
+      (u) => !site.assignedUsers?.some((au) => au._id === u._id)
+    )
+
+    // Developers can assign anyone
+    if (isAdmin) return unassignedUsers
+
+    // Engineers can assign any supervisor or worker
+    if (currentUser.role === 2) {
+      return unassignedUsers.filter(u => u.role === 3 || u.role === 4)
+    }
+
+    // Supervisors can assign any worker
+    if (currentUser.role === 3) {
+      return unassignedUsers.filter(u => u.role === 4)
+    }
+
+    return []
+  }
+
+  const availableUsers = getAvailableUsersForAssignment()
 
   return (
     <div className="space-y-6">
@@ -305,14 +343,16 @@ export default function SiteDetail() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleUnassignUser(u._id)}
-                            title="Remove from site"
-                          >
-                            <X className="h-4 w-4 text-destructive" />
-                          </Button>
+                          {canRemoveUser(u) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleUnassignUser(u._id)}
+                              title="Remove from site"
+                            >
+                              <X className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))

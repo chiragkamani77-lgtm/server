@@ -44,8 +44,11 @@ const siteSchema = new mongoose.Schema({
 
 // Check if user has access to site
 siteSchema.methods.hasAccess = function(userId) {
-  return this.assignedUsers.some(u => u.toString() === userId.toString()) ||
-         this.createdBy.toString() === userId.toString();
+  return this.assignedUsers.some(u => {
+    // Handle both populated (u is a User object) and non-populated (u is an ObjectId)
+    const uId = u._id || u;
+    return uId.toString() === userId.toString();
+  }) || this.createdBy.toString() === userId.toString();
 };
 
 const Site = mongoose.model('Site', siteSchema);

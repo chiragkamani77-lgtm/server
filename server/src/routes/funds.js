@@ -264,6 +264,9 @@ router.get('/', authenticate, async (req, res) => {
       // Engineers/Supervisors see allocations to/from them
       filter.$or = [{ fromUser: req.user._id }, { toUser: req.user._id }];
     } else if (req.user.role === 3) {
+
+      console.log('Worker role filter');
+
       // Workers see only allocations to them
       filter.toUser = req.user._id;
     }
@@ -407,8 +410,8 @@ router.get('/wallet/summary', authenticate, async (req, res) => {
     // Convert userId properly - handle both string query param and ObjectId from req.user
     const userId = req.query.userId && req.user.role === 1
       ? (req.query.userId instanceof mongoose.Types.ObjectId
-          ? req.query.userId
-          : mongoose.Types.ObjectId.createFromHexString(req.query.userId))
+        ? req.query.userId
+        : mongoose.Types.ObjectId.createFromHexString(req.query.userId))
       : req.user._id;
 
     // Convert organization properly
@@ -759,8 +762,8 @@ router.get('/flow/summary', authenticate, async (req, res) => {
   }
 });
 
-// Create fund allocation (Level 1 and 2)
-router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
+// Create fund allocation (Level 1, 2, and 3)
+router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     if (!req.user.organization) {
       return res.status(400).json({ message: 'No organization assigned' });
@@ -774,18 +777,27 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(404).json({ message: 'Recipient not found' });
     }
 
-    // For Level 2, check wallet balance and prevent self-allocation
-    if (req.user.role === 2) {
-      // Level 2 cannot allocate to themselves
+    // For Level 2 (Engineer) and Level 3 (Supervisor), check wallet balance and prevent self-allocation
+    if (req.user.role === 2 || req.user.role === 3) {
+      // Engineers and Supervisors cannot allocate to themselves
       if (toUserId === req.user._id.toString()) {
         return res.status(400).json({ message: 'Cannot allocate funds to yourself. Only developers can allocate from investment pool.' });
       }
 
-      // Check team member relationship
-      const childIds = await req.user.getChildIds();
-      if (!childIds.some(id => id.toString() === toUserId)) {
-        return res.status(403).json({ message: 'Can only allocate funds to your team members' });
+      // Allow Engineer → Supervisor transfer
+      const isEngineerToSupervisor =
+        req.user.role === 2 && toUser.role === 3;
+
+      if (!isEngineerToSupervisor) {
+        // Otherwise, enforce team hierarchy
+        const childIds = await req.user.getChildIds();
+        if (!childIds.some(id => id.toString() === toUserId)) {
+          return res.status(403).json({
+            message: 'Can only allocate funds to your team members or supervisor'
+          });
+        }
       }
+
 
       // Validate wallet balance
       const walletCheck = await validateWalletBalance(req.user._id, amount, req.user.organization);
@@ -830,7 +842,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
       purpose,
       description,
       referenceNumber,
-      status: req.user.role === 1 ? 'disbursed' : 'pending' // Auto-disburse if from Developer
+      status: 'disbursed' // Auto-disburse if from Developer
     });
 
     await allocation.save();
@@ -845,7 +857,7 @@ router.post('/', authenticate, requireRole(1, 2), async (req, res) => {
 });
 
 // Update allocation status (approve/reject/disburse)
-router.put('/:id/status', authenticate, requireRole(1, 2), async (req, res) => {
+router.put('/:id/status', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     const { status } = req.body;
 
@@ -864,8 +876,8 @@ router.put('/:id/status', authenticate, requireRole(1, 2), async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    // Level 1 can approve/reject any, Level 2 can only disburse their received funds
-    if (req.user.role === 2) {
+    // Level 1 can approve/reject any, Level 2 and 3 can only disburse their received funds
+    if (req.user.role === 2 || req.user.role === 3) {
       if (status !== 'disbursed' || allocation.toUser.toString() !== req.user._id.toString()) {
         return res.status(403).json({ message: 'Can only mark as disbursed for funds you received' });
       }
@@ -907,7 +919,7 @@ router.get('/:id', authenticate, async (req, res) => {
     // Non-developers can only see their own allocations
     if (req.user.role !== 1) {
       if (allocation.fromUser._id.toString() !== req.user._id.toString() &&
-          allocation.toUser._id.toString() !== req.user._id.toString()) {
+        allocation.toUser._id.toString() !== req.user._id.toString()) {
         return res.status(403).json({ message: 'Access denied' });
       }
     }

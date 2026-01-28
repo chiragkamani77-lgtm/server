@@ -382,24 +382,28 @@ export default function Users() {
                   minLength={6}
                 />
               </div>
-              {isAdmin && (
-                <div className="space-y-2">
-                  <Label>Role</Label>
-                  <Select
-                    value={form.role}
-                    onValueChange={(value) => setForm({ ...form, role: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="2">Engineer</SelectItem>
-                      <SelectItem value="3">Supervisor</SelectItem>
-                      <SelectItem value="4">Worker</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select
+                  value={form.role}
+                  onValueChange={(value) => setForm({ ...form, role: value })}
+                  disabled={!isAdmin && !isSupervisor}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {isAdmin && <SelectItem value="2">Engineer</SelectItem>}
+                    {(isAdmin || currentUser?.role === 2) && <SelectItem value="3">Supervisor</SelectItem>}
+                    <SelectItem value="4">Worker</SelectItem>
+                  </SelectContent>
+                </Select>
+                {!isAdmin && (
+                  <p className="text-xs text-muted-foreground">
+                    {currentUser?.role === 2 ? 'Engineers can create Supervisors or Workers' : 'Supervisors can create Workers only'}
+                  </p>
+                )}
+              </div>
               {(form.role === '3' || form.role === '4') && (
                 <div className="space-y-2">
                   <Label>Daily Rate (₹)</Label>

@@ -138,7 +138,7 @@ router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
 });
 
 // Assign user to site
-router.post('/:id/assign', authenticate, requireRole(1, 2), async (req, res) => {
+router.post('/:id/assign', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     const { userId } = req.body;
 
@@ -147,22 +147,23 @@ router.post('/:id/assign', authenticate, requireRole(1, 2), async (req, res) => 
       return res.status(404).json({ message: 'Site not found' });
     }
 
-    // Level 2 can only assign if they have access to the site
-    if (req.user.role === 2 && !site.hasAccess(req.user._id)) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    // Level 2 can only assign their children
-    if (req.user.role === 2) {
-      const childIds = await req.user.getChildIds();
-      if (!childIds.some(id => id.toString() === userId)) {
-        return res.status(403).json({ message: 'Can only assign your own team members' });
-      }
-    }
-
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Level 2 (Engineer) can assign any supervisor or worker to any site
+    if (req.user.role === 2) {
+      if (user.role !== 3 && user.role !== 4) {
+        return res.status(403).json({ message: 'Engineers can only assign supervisors or workers to sites' });
+      }
+    }
+
+    // Level 3 (Supervisor) can assign any worker to any site
+    if (req.user.role === 3) {
+      if (user.role !== 4) {
+        return res.status(403).json({ message: 'Supervisors can only assign workers to sites' });
+      }
     }
 
     if (!site.assignedUsers.includes(userId)) {
@@ -170,7 +171,7 @@ router.post('/:id/assign', authenticate, requireRole(1, 2), async (req, res) => 
       await site.save();
     }
 
-    await site.populate('assignedUsers', 'name email role');
+    await site.populate('assignedUsers', 'name email role parent');
 
     res.json(site);
   } catch (error) {
@@ -179,16 +180,30 @@ router.post('/:id/assign', authenticate, requireRole(1, 2), async (req, res) => 
 });
 
 // Remove user from site
-router.delete('/:id/assign/:userId', authenticate, requireRole(1, 2), async (req, res) => {
+router.delete('/:id/assign/:userId', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {
     const site = await Site.findById(req.params.id);
     if (!site) {
       return res.status(404).json({ message: 'Site not found' });
     }
 
-    // Level 2 can only remove if they have access
-    if (req.user.role === 2 && !site.hasAccess(req.user._id)) {
-      return res.status(403).json({ message: 'Access denied' });
+    const userToRemove = await User.findById(req.params.userId);
+    if (!userToRemove) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Level 2 (Engineer) can remove any supervisor or worker from any site
+    if (req.user.role === 2) {
+      if (userToRemove.role !== 3 && userToRemove.role !== 4) {
+        return res.status(403).json({ message: 'Engineers can only remove supervisors or workers from sites' });
+      }
+    }
+
+    // Level 3 (Supervisor) can remove any worker from any site
+    if (req.user.role === 3) {
+      if (userToRemove.role !== 4) {
+        return res.status(403).json({ message: 'Supervisors can only remove workers from sites' });
+      }
     }
 
     site.assignedUsers = site.assignedUsers.filter(
@@ -196,7 +211,7 @@ router.delete('/:id/assign/:userId', authenticate, requireRole(1, 2), async (req
     );
     await site.save();
 
-    await site.populate('assignedUsers', 'name email role');
+    await site.populate('assignedUsers', 'name email role parent');
 
     res.json(site);
   } catch (error) {

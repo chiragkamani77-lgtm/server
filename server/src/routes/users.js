@@ -14,10 +14,19 @@ router.get('/', authenticate, async (req, res) => {
       users = await User.find()
         .populate('parent', 'name email')
         .sort({ role: 1, createdAt: -1 });
+    } else if (req.user.role === 2) {
+      // Engineer sees all supervisors and workers
+      users = await User.find({ role: { $in: [2, 3, 4] } })
+        .populate('parent', 'name email')
+        .sort({ role: 1, createdAt: -1 });
+    } else if (req.user.role === 3) {
+      // Supervisor sees all workers
+      users = await User.find({ role: 4 })
+        .populate('parent', 'name email')
+        .sort({ role: 1, createdAt: -1 });
     } else {
-      // Others see only their children
-      const childIds = await req.user.getChildIds();
-      users = await User.find({ _id: { $in: [req.user._id, ...childIds] } })
+      // Workers see only themselves
+      users = await User.find({ _id: req.user._id })
         .populate('parent', 'name email')
         .sort({ role: 1, createdAt: -1 });
     }

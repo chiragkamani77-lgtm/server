@@ -229,7 +229,17 @@ export default function Sites() {
           <Card className="col-span-full">
             <CardContent className="flex flex-col items-center justify-center py-12">
               <Building className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">No sites found</p>
+              <p className="text-muted-foreground text-lg font-medium mb-2">No sites found</p>
+              {!isAdmin && (
+                <div className="text-center max-w-md">
+                  <p className="text-sm text-muted-foreground mb-2">
+                    You haven't been assigned to any sites yet.
+                  </p>
+                  <p className="text-sm text-blue-600">
+                    Contact your administrator to assign you to construction sites so you can manage expenses, track attendance, and allocate funds.
+                  </p>
+                </div>
+              )}
               {isAdmin && (
                 <Button className="mt-4" onClick={() => setIsAddOpen(true)}>
                   <Plus className="h-4 w-4 mr-2" />

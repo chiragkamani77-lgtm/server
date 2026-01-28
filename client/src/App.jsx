@@ -53,7 +53,7 @@ function AppRoutes() {
         <Route
           path="/users"
           element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
+            <ProtectedRoute allowedRoles={[1, 2, 3]}>
               <Users />
             </ProtectedRoute>
           }
@@ -84,7 +84,7 @@ function AppRoutes() {
         <Route
           path="/funds"
           element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
+            <ProtectedRoute allowedRoles={[1, 2, 3]}>
               <FundAllocations />
             </ProtectedRoute>
           }
