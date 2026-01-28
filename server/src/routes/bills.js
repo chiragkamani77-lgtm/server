@@ -377,7 +377,7 @@ router.put('/:id/approve', authenticate, async (req, res) => {
     await bill.populate('createdBy', 'name email');
     await bill.populate('approvedBy', 'name');
     await bill.populate('fundAllocation');
-    await bill.populate('linkedInvestment');
+    // await bill.populate('linkedInvestment');
 
     res.json(bill);
   } catch (error) {
