@@ -1,5 +1,5 @@
 import express from 'express';
-import { Site, User } from '../models/index.js';
+import { Site, User, FundAllocation, Expense, Bill } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -30,6 +30,26 @@ router.get('/', authenticate, async (req, res) => {
         .populate('assignedUsers', 'name email role')
         .populate('organization', 'name')
         .sort({ createdAt: -1 });
+    }
+
+    // Add GST bill summary for each site (only for developers)
+    if (req.user.role === 1) {
+      const sitesWithGst = await Promise.all(sites.map(async (site) => {
+        const bills = await Bill.find({ site: site._id, organization: req.user.organization });
+        const gstSummary = {
+          totalBills: bills.length,
+          totalGstAmount: bills.reduce((sum, b) => sum + (b.gstAmount || 0), 0),
+          totalAmount: bills.reduce((sum, b) => sum + (b.totalAmount || 0), 0),
+          pendingBills: bills.filter(b => b.status === 'pending').length,
+          approvedBills: bills.filter(b => b.status === 'approved').length,
+          paidBills: bills.filter(b => b.status === 'paid').length,
+        };
+        return {
+          ...site.toObject(),
+          gstSummary
+        };
+      }));
+      return res.json(sitesWithGst);
     }
 
     res.json(sites);
@@ -234,6 +254,75 @@ router.get('/:id/users', authenticate, async (req, res) => {
     }
 
     res.json(site.assignedUsers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get fund summary for a site
+router.get('/:id/funds', authenticate, async (req, res) => {
+  try {
+    const site = await Site.findById(req.params.id);
+    if (!site) {
+      return res.status(404).json({ message: 'Site not found' });
+    }
+
+    // Check access
+    if (req.user.role !== 1 && !site.hasAccess(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Get all fund allocations for this site
+    const allocations = await FundAllocation.find({
+      site: req.params.id,
+      organization: req.user.organization
+    })
+      .populate('fromUser', 'name email role')
+      .populate('toUser', 'name email role')
+      .sort({ allocationDate: -1 });
+
+    // Calculate fund summary by status
+    const totalAllocated = allocations
+      .filter(a => a.status !== 'rejected')
+      .reduce((sum, a) => sum + a.amount, 0);
+
+    const totalDisbursed = allocations
+      .filter(a => a.status === 'disbursed')
+      .reduce((sum, a) => sum + a.amount, 0);
+
+    const totalPending = allocations
+      .filter(a => a.status === 'pending' || a.status === 'approved')
+      .reduce((sum, a) => sum + a.amount, 0);
+
+    // Get all expenses for this site
+    const expenses = await Expense.find({
+      site: req.params.id,
+      organization: req.user.organization
+    });
+
+    const totalExpenses = expenses
+      .filter(e => e.status === 'paid')
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const pendingExpenses = expenses
+      .filter(e => e.status === 'pending' || e.status === 'approved')
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    // Calculate remaining funds
+    const remainingFunds = totalDisbursed - totalExpenses;
+
+    res.json({
+      allocations,
+      summary: {
+        totalAllocated,
+        totalDisbursed,
+        totalPending,
+        totalExpenses,
+        pendingExpenses,
+        remainingFunds,
+        utilizationPercentage: totalDisbursed > 0 ? ((totalExpenses / totalDisbursed) * 100).toFixed(2) : 0
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

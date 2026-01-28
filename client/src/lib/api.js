@@ -64,7 +64,8 @@ export const sitesApi = {
   delete: (id) => api.delete(`/sites/${id}`),
   assign: (siteId, userId) => api.post(`/sites/${siteId}/assign`, { userId }),
   unassign: (siteId, userId) => api.delete(`/sites/${siteId}/assign/${userId}`),
-  getUsers: (siteId) => api.get(`/sites/${siteId}/users`)
+  getUsers: (siteId) => api.get(`/sites/${siteId}/users`),
+  getFunds: (siteId) => api.get(`/sites/${siteId}/funds`)
 }
 
 // Expenses API
@@ -161,6 +162,7 @@ export const billsApi = {
   getOne: (id) => api.get(`/bills/${id}`),
   create: (data) => api.post('/bills', data),
   update: (id, data) => api.put(`/bills/${id}`, data),
+  approve: (id, data) => api.put(`/bills/${id}/approve`, data),
   updateStatus: (id, status) => api.put(`/bills/${id}/status`, { status }),
   delete: (id) => api.delete(`/bills/${id}`),
   getSummary: () => api.get('/bills/summary'),

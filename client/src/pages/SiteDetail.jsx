@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
-import { sitesApi, expensesApi, usersApi } from '@/lib/api'
+import { sitesApi, expensesApi, usersApi, billsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -24,8 +24,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { useExpensePermissions } from '@/hooks/useExpensePermissions'
 import { ExpenseTable, ExpenseForm, ExpenseFilters } from '@/components/expenses'
+import { BillForm, BillActions } from '@/components/bills'
 import { formatCurrency, STATUS_COLORS, ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
-import { ArrowLeft, Plus, UserPlus, X } from 'lucide-react'
+import { ArrowLeft, Plus, UserPlus, X, CheckCircle, Ban, DollarSign } from 'lucide-react'
 
 export default function SiteDetail() {
   const { id } = useParams()
@@ -36,13 +37,19 @@ export default function SiteDetail() {
 
   const [site, setSite] = useState(null)
   const [expenses, setExpenses] = useState([])
+  const [bills, setBills] = useState([])
   const [users, setUsers] = useState([])
   const [summary, setSummary] = useState(null)
+  const [fundSummary, setFundSummary] = useState(null)
+  const [fundAllocations, setFundAllocations] = useState([])
   const [loading, setLoading] = useState(true)
   const [expensesLoading, setExpensesLoading] = useState(false)
+  const [billsLoading, setBillsLoading] = useState(false)
 
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
   const [isAssignUserOpen, setIsAssignUserOpen] = useState(false)
+  const [isAddBillOpen, setIsAddBillOpen] = useState(false)
+  const [billActionState, setBillActionState] = useState({ isOpen: false, bill: null, action: 'approve' })
 
   const [expenseFilters, setExpenseFilters] = useState({
     category: '',
@@ -57,19 +64,25 @@ export default function SiteDetail() {
   useEffect(() => {
     if (site) {
       fetchExpenses()
+      if (isAdmin) {
+        fetchBills()
+      }
     }
   }, [site, expenseFilters])
 
   const fetchSiteData = async () => {
     setLoading(true)
     try {
-      const [siteRes, summaryRes] = await Promise.all([
+      const [siteRes, summaryRes, fundsRes] = await Promise.all([
         sitesApi.getOne(id),
         expensesApi.getSummary(id),
+        sitesApi.getFunds(id),
       ])
 
       setSite(siteRes.data)
       setSummary(summaryRes.data)
+      setFundSummary(fundsRes.data.summary)
+      setFundAllocations(fundsRes.data.allocations || [])
 
       if (canManageUsers) {
         const usersRes = await usersApi.getAll()
@@ -116,6 +129,23 @@ export default function SiteDetail() {
     }
   }
 
+  const fetchBills = async () => {
+    setBillsLoading(true)
+    try {
+      const billsRes = await billsApi.getAll({ siteId: id })
+      setBills(billsRes.data?.bills || [])
+    } catch (error) {
+      console.error('Error loading bills:', error)
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to load bills',
+        variant: 'destructive',
+      })
+    } finally {
+      setBillsLoading(false)
+    }
+  }
+
   const handleAddExpenseSuccess = () => {
     setIsAddExpenseOpen(false)
     fetchExpenses()
@@ -124,6 +154,30 @@ export default function SiteDetail() {
       title: 'Success',
       description: 'Expense added successfully.',
     })
+  }
+
+  const handleAddBillSuccess = () => {
+    setIsAddBillOpen(false)
+    fetchBills()
+    fetchSiteData() // Refresh summary
+    toast({
+      title: 'Success',
+      description: 'GST Bill added successfully.',
+    })
+  }
+
+  const handleBillAction = (bill, action) => {
+    setBillActionState({ isOpen: true, bill, action })
+  }
+
+  const handleBillActionSuccess = async () => {
+    setBillActionState({ isOpen: false, bill: null, action: 'approve' })
+    toast({
+      title: 'Success',
+      description: 'Bill updated successfully',
+    })
+    await fetchBills()
+    await fetchSiteData()
   }
 
   const handleAssignUser = async (userId) => {
@@ -226,23 +280,68 @@ export default function SiteDetail() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Funds Allocated</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCurrency(fundSummary?.totalAllocated || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Pending: {formatCurrency(fundSummary?.totalPending || 0)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Funds Disbursed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {formatCurrency(fundSummary?.totalDisbursed || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Available to spend
+            </p>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(summary?.totalExpenses || 0)}
+            <div className="text-2xl font-bold text-orange-600">
+              {formatCurrency(fundSummary?.totalExpenses || 0)}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Pending: {formatCurrency(fundSummary?.pendingExpenses || 0)}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Total Entries</CardTitle>
+            <CardTitle className="text-sm font-medium">Remaining Funds</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${(fundSummary?.remainingFunds || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {formatCurrency(fundSummary?.remainingFunds || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {fundSummary?.utilizationPercentage || 0}% utilized
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Expense Entries</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{summary?.totalEntries || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Total records
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -251,6 +350,9 @@ export default function SiteDetail() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{site.assignedUsers?.length || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Team members
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -259,6 +361,8 @@ export default function SiteDetail() {
       <Tabs defaultValue="expenses" className="space-y-4">
         <TabsList>
           <TabsTrigger value="expenses">Expenses</TabsTrigger>
+          <TabsTrigger value="funds">Funds</TabsTrigger>
+          {isAdmin && <TabsTrigger value="bills">GST Bills</TabsTrigger>}
           {canManageUsers && <TabsTrigger value="users">Team</TabsTrigger>}
           <TabsTrigger value="summary">Summary</TabsTrigger>
         </TabsList>
@@ -301,6 +405,241 @@ export default function SiteDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Funds Tab */}
+        <TabsContent value="funds" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Fund Allocations</CardTitle>
+              <CardDescription>Funds allocated to this site</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {fundAllocations.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No fund allocations for this site yet
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>From</TableHead>
+                      <TableHead>To</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Purpose</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Reference</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {fundAllocations.map((allocation) => (
+                      <TableRow key={allocation._id}>
+                        <TableCell>
+                          {new Date(allocation.allocationDate).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {allocation.fromUser?.name}
+                        </TableCell>
+                        <TableCell>{allocation.toUser?.name}</TableCell>
+                        <TableCell className="font-bold">
+                          {formatCurrency(allocation.amount)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {allocation.purpose?.replace(/_/g, ' ').toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={
+                              allocation.status === 'disbursed'
+                                ? 'bg-green-100 text-green-800'
+                                : allocation.status === 'approved'
+                                ? 'bg-blue-100 text-blue-800'
+                                : allocation.status === 'rejected'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }
+                          >
+                            {allocation.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {allocation.referenceNumber || '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* GST Bills Tab (Developer Only) */}
+        {isAdmin && (
+          <TabsContent value="bills" className="space-y-4">
+            <div className="flex justify-end">
+              <Button onClick={() => setIsAddBillOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add GST Bill
+              </Button>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>GST Bills</CardTitle>
+                <CardDescription>Bills and invoices with GST for this site</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {billsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                  </div>
+                ) : bills.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    No GST bills for this site yet
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Vendor</TableHead>
+                        <TableHead>Invoice #</TableHead>
+                        <TableHead>Base Amount</TableHead>
+                        <TableHead>GST %</TableHead>
+                        <TableHead>GST Amount</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {bills.map((bill) => (
+                        <TableRow key={bill._id}>
+                          <TableCell>
+                            {new Date(bill.billDate).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <div>{bill.vendorName}</div>
+                            {bill.vendorGstNumber && (
+                              <div className="text-xs text-muted-foreground">
+                                GSTIN: {bill.vendorGstNumber}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>{bill.invoiceNumber || '-'}</TableCell>
+                          <TableCell>{formatCurrency(bill.baseAmount)}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{bill.gstRate}%</Badge>
+                          </TableCell>
+                          <TableCell className="text-orange-600">
+                            {formatCurrency(bill.gstAmount)}
+                          </TableCell>
+                          <TableCell className="font-bold">
+                            {formatCurrency(bill.totalAmount)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {bill.billType?.replace(/_/g, ' ').toUpperCase()}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={
+                                bill.status === 'paid'
+                                  ? 'bg-green-100 text-green-800'
+                                  : bill.status === 'approved'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : bill.status === 'credited'
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : bill.status === 'rejected'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-yellow-100 text-yellow-800'
+                              }
+                            >
+                              {bill.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {bill.status === 'pending' && (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs"
+                                  onClick={() => handleBillAction(bill, 'approve')}
+                                >
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs text-red-600 hover:text-red-700"
+                                  onClick={() => handleBillAction(bill, 'reject')}
+                                >
+                                  <Ban className="h-3 w-3 mr-1" />
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                            {bill.status === 'approved' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => handleBillAction(bill, 'pay')}
+                              >
+                                <DollarSign className="h-3 w-3 mr-1" />
+                                Mark Paid
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+
+                {/* GST Summary for this site */}
+                {bills.length > 0 && (
+                  <div className="mt-6 pt-6 border-t">
+                    <h4 className="font-semibold mb-4">GST Summary</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-gray-50 p-3 rounded">
+                        <p className="text-xs text-muted-foreground">Total Base Amount</p>
+                        <p className="text-lg font-bold">
+                          {formatCurrency(bills.reduce((sum, b) => sum + b.baseAmount, 0))}
+                        </p>
+                      </div>
+                      <div className="bg-orange-50 p-3 rounded">
+                        <p className="text-xs text-muted-foreground">Total GST</p>
+                        <p className="text-lg font-bold text-orange-600">
+                          {formatCurrency(bills.reduce((sum, b) => sum + b.gstAmount, 0))}
+                        </p>
+                      </div>
+                      <div className="bg-blue-50 p-3 rounded">
+                        <p className="text-xs text-muted-foreground">Total Amount</p>
+                        <p className="text-lg font-bold text-blue-600">
+                          {formatCurrency(bills.reduce((sum, b) => sum + b.totalAmount, 0))}
+                        </p>
+                      </div>
+                      <div className="bg-green-50 p-3 rounded">
+                        <p className="text-xs text-muted-foreground">Total Bills</p>
+                        <p className="text-lg font-bold text-green-600">
+                          {bills.length}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         {/* Users Tab */}
         {canManageUsers && (
@@ -406,6 +745,29 @@ export default function SiteDetail() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Add GST Bill Dialog - Using Reusable Form */}
+      <Dialog open={isAddBillOpen} onOpenChange={setIsAddBillOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add GST Bill to {site.name}</DialogTitle>
+          </DialogHeader>
+          <BillForm
+            siteId={id}
+            onSuccess={handleAddBillSuccess}
+            onCancel={() => setIsAddBillOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Bill Actions Dialog (Approve/Pay/Reject) */}
+      <BillActions
+        bill={billActionState.bill}
+        isOpen={billActionState.isOpen}
+        onClose={() => setBillActionState({ isOpen: false, bill: null, action: 'approve' })}
+        onSuccess={handleBillActionSuccess}
+        action={billActionState.action}
+      />
 
       {/* Assign User Dialog */}
       <Dialog open={isAssignUserOpen} onOpenChange={setIsAssignUserOpen}>

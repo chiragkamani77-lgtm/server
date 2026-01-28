@@ -275,6 +275,32 @@ export default function Sites() {
                   <Users className="h-4 w-4" />
                   {site.assignedUsers?.length || 0} users assigned
                 </div>
+
+                {/* GST Bill Summary (for admins only) */}
+                {isAdmin && site.gstSummary && site.gstSummary.totalBills > 0 && (
+                  <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-lg p-3 mb-4">
+                    <div className="text-xs font-semibold text-orange-900 mb-2">GST Bills Summary</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Total GST:</span>
+                        <span className="font-semibold ml-1">₹{site.gstSummary.totalGstAmount.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Bills:</span>
+                        <span className="font-semibold ml-1">{site.gstSummary.totalBills}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Pending:</span>
+                        <span className="font-semibold ml-1 text-yellow-700">{site.gstSummary.pendingBills}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Paid:</span>
+                        <span className="font-semibold ml-1 text-green-700">{site.gstSummary.paidBills}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <Button asChild variant="outline" size="sm" className="flex-1">
                     <Link to={`/sites/${site._id}`}>

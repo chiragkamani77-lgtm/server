@@ -310,6 +310,83 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
+// Approve/Pay/Reject bill
+router.put('/:id/approve', authenticate, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // Only developers can approve
+    if (req.user.role !== 1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ message: 'Only developers can approve bills' });
+    }
+
+    const bill = await Bill.findById(req.params.id).session(session);
+
+    if (!bill) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Bill not found' });
+    }
+
+    // Check organization access
+    if (bill.organization.toString() !== req.user.organization?.toString()) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const { status, approvedAmount, approvalNotes, paymentMethod, paymentReference } = req.body;
+
+    if (!['approved', 'paid', 'rejected'].includes(status)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+
+    const oldStatus = bill.status;
+    bill.status = status;
+
+    if (status === 'approved' || status === 'paid') {
+      if (approvedAmount === undefined || approvedAmount === null) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: 'Approved amount is required' });
+      }
+      bill.approvedAmount = approvedAmount;
+      bill.totalAmount = approvedAmount; // Set actual amount
+      bill.approvedBy = req.user._id;
+      bill.approvalDate = new Date();
+    }
+
+    if (status === 'paid') {
+      bill.paidDate = new Date();
+      if (paymentMethod) bill.paymentMethod = paymentMethod;
+      if (paymentReference) bill.paymentReference = paymentReference;
+    }
+
+    if (approvalNotes !== undefined) bill.approvalNotes = approvalNotes;
+
+    await bill.save({ session });
+    await session.commitTransaction();
+    session.endSession();
+
+    await bill.populate('site', 'name');
+    await bill.populate('createdBy', 'name email');
+    await bill.populate('approvedBy', 'name');
+    await bill.populate('fundAllocation');
+    await bill.populate('linkedInvestment');
+
+    res.json(bill);
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Update bill status (credit/pay)
 router.put('/:id/status', authenticate, requireRole(1), async (req, res) => {
   const session = await mongoose.startSession();

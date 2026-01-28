@@ -762,6 +762,128 @@ router.get('/flow/summary', authenticate, async (req, res) => {
   }
 });
 
+// Enhanced fund flow with site-wise and GST breakdown
+router.get('/flow/detailed', authenticate, async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    // Get all disbursed allocations
+    const allocations = await FundAllocation.find({
+      organization: req.user.organization,
+      status: 'disbursed'
+    })
+      .populate('fromUser', 'name email role')
+      .populate('toUser', 'name email role')
+      .populate('site', 'name')
+      .sort({ allocationDate: -1 });
+
+    // Get site-wise fund allocation and utilization
+    const siteWiseData = await FundAllocation.aggregate([
+      {
+        $match: {
+          organization: req.user.organization,
+          status: 'disbursed',
+          site: { $exists: true, $ne: null }
+        }
+      },
+      {
+        $group: {
+          _id: '$site',
+          totalAllocated: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $lookup: {
+          from: 'sites',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'siteDetails'
+        }
+      },
+      { $unwind: '$siteDetails' },
+      {
+        $lookup: {
+          from: 'expenses',
+          let: { siteId: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$site', '$$siteId'] }, status: 'paid' } },
+            {
+              $group: {
+                _id: null,
+                totalExpenses: { $sum: '$amount' },
+                totalBaseAmount: { $sum: { $ifNull: ['$baseAmount', 0] } },
+                totalGST: { $sum: { $ifNull: ['$gstAmount', 0] } },
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          as: 'expenseData'
+        }
+      },
+      {
+        $project: {
+          site: '$siteDetails',
+          totalAllocated: 1,
+          allocationCount: '$count',
+          expenses: { $arrayElemAt: ['$expenseData', 0] }
+        }
+      }
+    ]);
+
+    // Get GST breakdown across all expenses
+    const gstBreakdown = await Expense.aggregate([
+      {
+        $match: {
+          organization: req.user.organization,
+          status: 'paid',
+          isBill: true
+        }
+      },
+      {
+        $group: {
+          _id: '$gstPercentage',
+          totalBaseAmount: { $sum: '$baseAmount' },
+          totalGST: { $sum: '$gstAmount' },
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // User-wise wallet balances
+    const userWallets = await Wallet.find({
+      organization: req.user.organization
+    })
+      .populate('user', 'name email role')
+      .sort({ balance: -1 });
+
+    res.json({
+      allocations,
+      siteWise: siteWiseData.map(s => ({
+        site: s.site,
+        totalAllocated: s.totalAllocated,
+        allocationCount: s.allocationCount,
+        totalExpenses: s.expenses?.totalExpenses || 0,
+        totalBaseAmount: s.expenses?.totalBaseAmount || 0,
+        totalGST: s.expenses?.totalGST || 0,
+        expenseCount: s.expenses?.count || 0,
+        remaining: s.totalAllocated - (s.expenses?.totalExpenses || 0)
+      })),
+      gstBreakdown,
+      userWallets: userWallets.map(w => ({
+        user: w.user,
+        balance: w.balance
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Create fund allocation (Level 1, 2, and 3)
 router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   try {

@@ -64,8 +64,24 @@ const billSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'credited', 'paid', 'rejected'],
+    enum: ['pending', 'approved', 'credited', 'paid', 'rejected'],
     default: 'pending'
+  },
+  // Approval workflow fields
+  approvedAmount: {
+    type: Number,
+    min: 0
+  },
+  approvedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approvalDate: {
+    type: Date
+  },
+  approvalNotes: {
+    type: String,
+    trim: true
   },
   creditedDate: {
     type: Date
