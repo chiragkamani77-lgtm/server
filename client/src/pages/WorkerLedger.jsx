@@ -32,10 +32,22 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Wallet, TrendingUp, TrendingDown, Filter, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
+import { Plus, Wallet, TrendingUp, TrendingDown, Filter, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownLeft, Edit, Trash2 } from 'lucide-react'
+import { FundAllocationSelector } from '@/components/FundAllocationSelector'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const CATEGORIES = [
   { value: 'salary', label: 'Salary' },
+  { value: 'pending_salary', label: 'Pending Salary' },
   { value: 'advance', label: 'Advance' },
   { value: 'bonus', label: 'Bonus' },
   { value: 'deduction', label: 'Deduction' },
@@ -64,13 +76,21 @@ export default function WorkerLedger() {
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [deleteId, setDeleteId] = useState(null)
   const [isPaySalaryOpen, setIsPaySalaryOpen] = useState(false)
+  const [isBulkPayOpen, setIsBulkPayOpen] = useState(false)
+  const [bulkPendingWorkers, setBulkPendingWorkers] = useState([])
+  const [selectedWorkers, setSelectedWorkers] = useState([])
+  const [bulkSummary, setBulkSummary] = useState(null)
 
   const [filters, setFilters] = useState({
     workerId: '',
     siteId: '',
     type: '',
     category: '',
+    startDate: '',
+    endDate: '',
   })
 
   const [form, setForm] = useState({
@@ -90,6 +110,13 @@ export default function WorkerLedger() {
     fundAllocationId: '',
     amount: '',
     deductAdvances: true,
+    paymentMode: 'cash',
+    referenceNumber: '',
+    notes: '',
+  })
+
+  const [bulkPayForm, setBulkPayForm] = useState({
+    fundAllocationId: '',
     paymentMode: 'cash',
     referenceNumber: '',
     notes: '',
@@ -169,10 +196,16 @@ export default function WorkerLedger() {
     }
   }
 
+  const isEntryEditable = (entry) => {
+    // Developers (admin) can edit and delete any entry without restrictions
+    if (!isAdmin) return false
+    return true
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      await ledgerApi.create({
+      const ledgerData = {
         workerId: form.workerId,
         siteId: form.siteId || null,
         fundAllocationId: form.fundAllocationId || null,
@@ -183,8 +216,16 @@ export default function WorkerLedger() {
         transactionDate: form.transactionDate,
         referenceNumber: form.referenceNumber,
         paymentMode: form.paymentMode,
-      })
-      toast({ title: 'Ledger entry added' })
+      }
+
+      if (editingId) {
+        await ledgerApi.update(editingId, ledgerData)
+        toast({ title: 'Ledger entry updated' })
+      } else {
+        await ledgerApi.create(ledgerData)
+        toast({ title: 'Ledger entry added' })
+      }
+
       setIsAddOpen(false)
       resetForm()
       fetchEntries()
@@ -194,7 +235,51 @@ export default function WorkerLedger() {
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.message || 'Failed to add entry',
+        description: error.response?.data?.message || 'Failed to save entry',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleEdit = (entry) => {
+    if (!isEntryEditable(entry)) {
+      toast({
+        title: 'Cannot Edit',
+        description: 'This entry cannot be edited (too old, auto-generated, or already paid)',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setForm({
+      workerId: entry.worker?._id || '',
+      siteId: entry.site?._id || '',
+      fundAllocationId: entry.fundAllocation?._id || '',
+      type: entry.type,
+      amount: entry.amount.toString(),
+      category: entry.category,
+      description: entry.description || '',
+      transactionDate: entry.transactionDate.split('T')[0],
+      referenceNumber: entry.referenceNumber || '',
+      paymentMode: entry.paymentMode || 'cash',
+    })
+    setEditingId(entry._id)
+    setIsAddOpen(true)
+  }
+
+  const handleDelete = async () => {
+    try {
+      await ledgerApi.delete(deleteId)
+      toast({ title: 'Ledger entry deleted' })
+      setDeleteId(null)
+      fetchEntries()
+      if (filters.workerId) {
+        fetchWorkerBalance(filters.workerId)
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete entry',
         variant: 'destructive',
       })
     }
@@ -213,10 +298,20 @@ export default function WorkerLedger() {
       referenceNumber: '',
       paymentMode: 'cash',
     })
+    setEditingId(null)
   }
 
   const clearFilters = () => {
-    setFilters({ workerId: '', siteId: '', type: '', category: '' })
+    setFilters({ workerId: '', siteId: '', type: '', category: '', startDate: '', endDate: '' })
+    setPagination({ ...pagination, page: 1 })
+  }
+
+  const viewPaymentHistory = () => {
+    setFilters({
+      ...filters,
+      category: 'salary',
+      type: 'credit',
+    })
     setPagination({ ...pagination, page: 1 })
   }
 
@@ -225,7 +320,8 @@ export default function WorkerLedger() {
     if (!filters.workerId) return
 
     try {
-      await ledgerApi.paySalary(filters.workerId, {
+      await ledgerApi.paySalary({
+        workerId: filters.workerId,
         fundAllocationId: paySalaryForm.fundAllocationId || null,
         amount: parseFloat(paySalaryForm.amount),
         deductAdvances: paySalaryForm.deductAdvances,
@@ -273,6 +369,98 @@ export default function WorkerLedger() {
     setIsPaySalaryOpen(true)
   }
 
+  const fetchAllPendingSalaries = async () => {
+    try {
+      const { data } = await ledgerApi.getAllPendingSalaries()
+      setBulkPendingWorkers(data.workers || [])
+      setBulkSummary(data.summary || null)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch pending salaries',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const openBulkPayDialog = async () => {
+    await fetchAllPendingSalaries()
+    setIsBulkPayOpen(true)
+  }
+
+  const toggleWorkerSelection = (workerId) => {
+    setSelectedWorkers(prev =>
+      prev.includes(workerId)
+        ? prev.filter(id => id !== workerId)
+        : [...prev, workerId]
+    )
+  }
+
+  const selectAllWorkers = () => {
+    setSelectedWorkers(bulkPendingWorkers.map(w => w.worker._id))
+  }
+
+  const deselectAllWorkers = () => {
+    setSelectedWorkers([])
+  }
+
+  const handleBulkPaySalary = async (e) => {
+    e.preventDefault()
+
+    if (selectedWorkers.length === 0) {
+      toast({
+        title: 'Error',
+        description: 'Please select at least one worker',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      const { data } = await ledgerApi.bulkPaySalary({
+        workerIds: selectedWorkers,
+        fundAllocationId: bulkPayForm.fundAllocationId,
+        paymentMode: bulkPayForm.paymentMode,
+        referenceNumber: bulkPayForm.referenceNumber,
+        notes: bulkPayForm.notes,
+      })
+
+      toast({
+        title: 'Bulk payment successful',
+        description: data.message,
+      })
+      setIsBulkPayOpen(false)
+      setSelectedWorkers([])
+      resetBulkPayForm()
+      fetchEntries()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to process bulk payment',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const resetBulkPayForm = () => {
+    setBulkPayForm({
+      fundAllocationId: '',
+      paymentMode: 'cash',
+      referenceNumber: '',
+      notes: '',
+    })
+  }
+
+  const getSelectedTotals = () => {
+    const selected = bulkPendingWorkers.filter(w => selectedWorkers.includes(w.worker._id))
+    return {
+      count: selected.length,
+      totalPending: selected.reduce((sum, w) => sum + w.totalPending, 0),
+      totalAdvances: selected.reduce((sum, w) => sum + w.totalAdvances, 0),
+      totalNetPayable: selected.reduce((sum, w) => sum + w.netPayable, 0),
+    }
+  }
+
   // Calculate totals from current entries
   const totalCredits = entries.filter(e => e.type === 'credit').reduce((sum, e) => sum + e.amount, 0)
   const totalDebits = entries.filter(e => e.type === 'debit').reduce((sum, e) => sum + e.amount, 0)
@@ -287,10 +475,16 @@ export default function WorkerLedger() {
           </p>
         </div>
         {(isAdmin || isSupervisor) && (
-          <Button onClick={() => setIsAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Entry
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={openBulkPayDialog}>
+              <Wallet className="h-4 w-4 mr-2" />
+              Bulk Pay Salary
+            </Button>
+            <Button onClick={() => setIsAddOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Entry
+            </Button>
+          </div>
         )}
       </div>
 
@@ -478,10 +672,37 @@ export default function WorkerLedger() {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label>Start Date</Label>
+              <Input
+                type="date"
+                value={filters.startDate}
+                onChange={(e) => {
+                  setFilters({ ...filters, startDate: e.target.value })
+                  setPagination({ ...pagination, page: 1 })
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>End Date</Label>
+              <Input
+                type="date"
+                value={filters.endDate}
+                onChange={(e) => {
+                  setFilters({ ...filters, endDate: e.target.value })
+                  setPagination({ ...pagination, page: 1 })
+                }}
+              />
+            </div>
+            <div className="space-y-2">
               <Label>&nbsp;</Label>
-              <Button variant="outline" className="w-full" onClick={clearFilters}>
-                Clear Filters
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={viewPaymentHistory}>
+                  Payment History
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={clearFilters}>
+                  Clear
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -504,12 +725,13 @@ export default function WorkerLedger() {
               <TableHead>Site</TableHead>
               <TableHead>Payment</TableHead>
               <TableHead className="text-right">Amount</TableHead>
+              {isAdmin && <TableHead className="text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={isAdmin ? 9 : 8} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -517,7 +739,7 @@ export default function WorkerLedger() {
               </TableRow>
             ) : entries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={isAdmin ? 9 : 8} className="text-center text-muted-foreground py-8">
                   No ledger entries found
                 </TableCell>
               </TableRow>
@@ -548,6 +770,30 @@ export default function WorkerLedger() {
                   <TableCell className={`text-right font-bold ${entry.type === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
                     {entry.type === 'credit' ? '+' : '-'}{formatCurrency(entry.amount)}
                   </TableCell>
+                  {isAdmin && (
+                    <TableCell className="text-right">
+                      {isEntryEditable(entry) ? (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEdit(entry)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteId(entry._id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -579,12 +825,17 @@ export default function WorkerLedger() {
       )}
 
       {/* Add Entry Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+      <Dialog open={isAddOpen} onOpenChange={(open) => {
+        setIsAddOpen(open)
+        if (!open) resetForm()
+      }}>
         <DialogContent className="max-w-lg">
           <form onSubmit={handleSubmit}>
             <DialogHeader>
-              <DialogTitle>Add Ledger Entry</DialogTitle>
-              <DialogDescription>Record a payment, advance, or deduction</DialogDescription>
+              <DialogTitle>{editingId ? 'Edit' : 'Add'} Ledger Entry</DialogTitle>
+              <DialogDescription>
+                {editingId ? 'Update ledger entry details' : 'Record a payment, advance, or deduction'}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
               <div className="space-y-2">
@@ -734,7 +985,7 @@ export default function WorkerLedger() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="submit">Add Entry</Button>
+              <Button type="submit">{editingId ? 'Update' : 'Add'} Entry</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -871,6 +1122,226 @@ export default function WorkerLedger() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Pay Salary Dialog */}
+      <Dialog open={isBulkPayOpen} onOpenChange={(open) => {
+        setIsBulkPayOpen(open)
+        if (!open) {
+          setSelectedWorkers([])
+          resetBulkPayForm()
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <form onSubmit={handleBulkPaySalary}>
+            <DialogHeader>
+              <DialogTitle>Bulk Salary Payment</DialogTitle>
+              <DialogDescription>
+                Select workers and pay their pending salaries at once
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {/* Summary */}
+              {bulkSummary && (
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                  <h3 className="font-medium mb-2">Overall Summary</h3>
+                  <div className="grid grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Workers</p>
+                      <p className="font-bold text-lg">{bulkSummary.totalWorkers}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Total Pending</p>
+                      <p className="font-bold text-lg text-orange-600">{formatCurrency(bulkSummary.totalPending)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Total Advances</p>
+                      <p className="font-bold text-lg text-red-600">-{formatCurrency(bulkSummary.totalAdvances)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Net Payable</p>
+                      <p className="font-bold text-lg text-green-600">{formatCurrency(bulkSummary.totalNetPayable)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Selected Summary */}
+              {selectedWorkers.length > 0 && (
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <h3 className="font-medium mb-2">Selected Workers Summary</h3>
+                  <div className="grid grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Selected</p>
+                      <p className="font-bold text-lg">{getSelectedTotals().count}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Total Pending</p>
+                      <p className="font-bold text-lg text-orange-600">{formatCurrency(getSelectedTotals().totalPending)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Total Advances</p>
+                      <p className="font-bold text-lg text-red-600">-{formatCurrency(getSelectedTotals().totalAdvances)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Amount to Pay</p>
+                      <p className="font-bold text-lg text-green-700">{formatCurrency(getSelectedTotals().totalNetPayable)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Worker Selection */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label className="text-base font-semibold">Select Workers</Label>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={selectAllWorkers}>
+                      Select All
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={deselectAllWorkers}>
+                      Deselect All
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border rounded-lg max-h-60 overflow-y-auto">
+                  {bulkPendingWorkers.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground">
+                      No workers with pending salaries found
+                    </div>
+                  ) : (
+                    <div className="divide-y">
+                      {bulkPendingWorkers.map((item) => (
+                        <div
+                          key={item.worker._id}
+                          className="p-3 hover:bg-muted/50 cursor-pointer flex items-center gap-3"
+                          onClick={() => toggleWorkerSelection(item.worker._id)}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkers.includes(item.worker._id)}
+                            onChange={() => toggleWorkerSelection(item.worker._id)}
+                            className="h-4 w-4 rounded border-gray-300"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="flex-1">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-medium">{item.worker.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.attendanceCount} attendance records
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-green-600">{formatCurrency(item.netPayable)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Pending: {formatCurrency(item.totalPending)}
+                                  {item.totalAdvances > 0 && ` | Adv: ${formatCurrency(item.totalAdvances)}`}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Payment Details */}
+              {selectedWorkers.length > 0 && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Fund Allocation *</Label>
+                    <FundAllocationSelector
+                      value={bulkPayForm.fundAllocationId}
+                      onChange={(value) => setBulkPayForm({ ...bulkPayForm, fundAllocationId: value })}
+                      requestedAmount={getSelectedTotals().totalNetPayable}
+                      required={true}
+                      label="Fund Source"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Payment Mode *</Label>
+                      <Select
+                        value={bulkPayForm.paymentMode}
+                        onValueChange={(value) => setBulkPayForm({ ...bulkPayForm, paymentMode: value })}
+                        required
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAYMENT_MODES.map((mode) => (
+                            <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Reference Number</Label>
+                      <Input
+                        value={bulkPayForm.referenceNumber}
+                        onChange={(e) => setBulkPayForm({ ...bulkPayForm, referenceNumber: e.target.value })}
+                        placeholder="Batch reference"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Notes</Label>
+                    <Textarea
+                      value={bulkPayForm.notes}
+                      onChange={(e) => setBulkPayForm({ ...bulkPayForm, notes: e.target.value })}
+                      placeholder="Bulk salary payment for..."
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsBulkPayOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={selectedWorkers.length === 0}
+              >
+                Pay {selectedWorkers.length} Worker{selectedWorkers.length !== 1 ? 's' : ''} - {formatCurrency(getSelectedTotals().totalNetPayable)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Ledger Entry</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this ledger entry? This action cannot be undone and may affect the worker's balance.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

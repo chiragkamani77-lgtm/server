@@ -194,7 +194,9 @@ export const ledgerApi = {
   delete: (id) => api.delete(`/ledger/${id}`),
   getBalance: (workerId) => api.get(`/ledger/balance/${workerId}`),
   getPendingSalary: (workerId) => api.get(`/ledger/pending-salary/${workerId}`),
-  paySalary: (workerId, data) => api.post(`/ledger/pay-salary/${workerId}`, data)
+  paySalary: (data) => api.post('/ledger/pay-salary', data),
+  getAllPendingSalaries: () => api.get('/ledger/all-pending-salaries'),
+  bulkPaySalary: (data) => api.post('/ledger/bulk-pay-salary', data)
 }
 
 // Contracts API

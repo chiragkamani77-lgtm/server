@@ -32,7 +32,17 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, ArrowRight, ArrowDown, Wallet, TrendingUp, Clock, ChevronLeft, ChevronRight, Check, X, Eye, Receipt, Users, Building2 } from 'lucide-react'
+import { Plus, ArrowRight, ArrowDown, Wallet, TrendingUp, Clock, ChevronLeft, ChevronRight, Check, X, Eye, Receipt, Users, Building2, Edit, Trash2 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const PURPOSES = [
   { value: 'site_expense', label: 'Site Expense' },
@@ -61,6 +71,8 @@ export default function FundAllocations() {
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [deleteId, setDeleteId] = useState(null)
   const [selectedAllocation, setSelectedAllocation] = useState(null)
   const [utilizationData, setUtilizationData] = useState(null)
 
@@ -126,22 +138,69 @@ export default function FundAllocations() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      await fundsApi.create({
+      const payload = {
         toUserId: form.toUserId,
         siteId: form.siteId || null,
         amount: parseFloat(form.amount),
         purpose: form.purpose,
         description: form.description,
         referenceNumber: form.referenceNumber,
-      })
-      toast({ title: 'Fund allocation created successfully' })
+      }
+
+      if (editingId) {
+        await fundsApi.update(editingId, payload)
+        toast({ title: 'Fund allocation updated successfully' })
+      } else {
+        await fundsApi.create(payload)
+        toast({ title: 'Fund allocation created successfully' })
+      }
+
       setIsAddOpen(false)
       resetForm()
       fetchData()
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.message || 'Failed to create allocation',
+        description: error.response?.data?.message || `Failed to ${editingId ? 'update' : 'create'} allocation`,
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleEdit = (allocation) => {
+    if (!isAllocationEditable(allocation)) {
+      toast({
+        title: 'Cannot Edit',
+        description: 'This allocation cannot be edited in its current status.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setForm({
+      toUserId: allocation.toUser?._id || '',
+      siteId: allocation.site?._id || '',
+      amount: allocation.amount.toString(),
+      purpose: allocation.purpose,
+      description: allocation.description || '',
+      referenceNumber: allocation.referenceNumber || '',
+    })
+    setEditingId(allocation._id)
+    setIsAddOpen(true)
+  }
+
+  const handleDelete = async () => {
+    if (!deleteId) return
+
+    try {
+      await fundsApi.delete(deleteId)
+      toast({ title: 'Fund allocation deleted successfully' })
+      setDeleteId(null)
+      fetchData()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete allocation',
         variant: 'destructive',
       })
     }
@@ -170,6 +229,34 @@ export default function FundAllocations() {
       description: '',
       referenceNumber: '',
     })
+    setEditingId(null)
+  }
+
+  // Business rule: Determine if allocation can be edited
+  const isAllocationEditable = (allocation) => {
+    if (!isAdmin && !isSupervisor) return false
+    // Only pending and approved allocations can be edited
+    // Disbursed and rejected are locked
+    return allocation.status === 'pending' || allocation.status === 'approved'
+  }
+
+  // Business rule: Determine if allocation can be deleted
+  const isAllocationDeletable = (allocation) => {
+    if (!isAdmin && !isSupervisor) return false
+    // Only pending allocations can be deleted
+    // Once approved, disbursed, or rejected - cannot delete
+    return allocation.status === 'pending'
+  }
+
+  // Determine which fields can be edited based on status
+  const getEditableFields = (status) => {
+    if (status === 'pending') {
+      return { toUser: true, site: true, amount: true, purpose: true, description: true, reference: true }
+    } else if (status === 'approved') {
+      // Limited edit - only non-financial fields
+      return { toUser: false, site: true, amount: false, purpose: false, description: true, reference: true }
+    }
+    return { toUser: false, site: false, amount: false, purpose: false, description: false, reference: false }
   }
 
   return (
@@ -441,7 +528,7 @@ export default function FundAllocations() {
                   </TableCell>
                   <TableCell className="text-right font-bold">{formatCurrency(allocation.amount)}</TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
                       {allocation.status === 'disbursed' && (
                         <Button
                           variant="ghost"
@@ -481,6 +568,26 @@ export default function FundAllocations() {
                           Mark Received
                         </Button>
                       )}
+                      {(isAdmin || isSupervisor) && isAllocationEditable(allocation) && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEdit(allocation)}
+                          title="Edit Allocation"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {(isAdmin || isSupervisor) && isAllocationDeletable(allocation) && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteId(allocation._id)}
+                          title="Delete Allocation"
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -513,21 +620,44 @@ export default function FundAllocations() {
         </div>
       )}
 
-      {/* Add Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+      {/* Add/Edit Dialog */}
+      <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
         <DialogContent>
           <form onSubmit={handleSubmit}>
             <DialogHeader>
-              <DialogTitle>Allocate Funds</DialogTitle>
-              <DialogDescription>Transfer funds to a team member for site expenses</DialogDescription>
+              <DialogTitle>{editingId ? 'Edit Fund Allocation' : 'Allocate Funds'}</DialogTitle>
+              <DialogDescription>
+                {editingId
+                  ? 'Update fund allocation details. Some fields may be locked based on allocation status.'
+                  : 'Transfer funds to a team member for site expenses'
+                }
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
+              {editingId && (() => {
+                const currentAllocation = allocations.find(a => a._id === editingId)
+                const editableFields = currentAllocation ? getEditableFields(currentAllocation.status) : {}
+                const hasLimitedEdit = currentAllocation?.status === 'approved'
+
+                return hasLimitedEdit && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                    <p className="text-sm text-yellow-800">
+                      <strong>Limited Edit Mode:</strong> This allocation is approved. You can only edit description, reference, and site. Amount and recipient cannot be changed.
+                    </p>
+                  </div>
+                )
+              })()}
+
               <div className="space-y-2">
                 <Label>Recipient</Label>
                 <Select
                   value={form.toUserId}
                   onValueChange={(value) => setForm({ ...form, toUserId: value })}
                   required
+                  disabled={editingId && !(() => {
+                    const currentAllocation = allocations.find(a => a._id === editingId)
+                    return currentAllocation ? getEditableFields(currentAllocation.status).toUser : false
+                  })()}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select recipient" />
@@ -546,6 +676,10 @@ export default function FundAllocations() {
                 <Select
                   value={form.siteId}
                   onValueChange={(value) => setForm({ ...form, siteId: value === 'none' ? '' : value })}
+                  disabled={editingId && !(() => {
+                    const currentAllocation = allocations.find(a => a._id === editingId)
+                    return currentAllocation ? getEditableFields(currentAllocation.status).site : false
+                  })()}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select site" />
@@ -569,6 +703,10 @@ export default function FundAllocations() {
                   placeholder="50000"
                   required
                   min="0"
+                  disabled={editingId && !(() => {
+                    const currentAllocation = allocations.find(a => a._id === editingId)
+                    return currentAllocation ? getEditableFields(currentAllocation.status).amount : false
+                  })()}
                 />
               </div>
               <div className="space-y-2">
@@ -576,6 +714,10 @@ export default function FundAllocations() {
                 <Select
                   value={form.purpose}
                   onValueChange={(value) => setForm({ ...form, purpose: value })}
+                  disabled={editingId && !(() => {
+                    const currentAllocation = allocations.find(a => a._id === editingId)
+                    return currentAllocation ? getEditableFields(currentAllocation.status).purpose : false
+                  })()}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -607,11 +749,32 @@ export default function FundAllocations() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="submit">Allocate Funds</Button>
+              <Button type="submit">{editingId ? 'Update Allocation' : 'Allocate Funds'}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Fund Allocation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this fund allocation? This action cannot be undone. Only pending allocations can be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
