@@ -327,6 +327,117 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
   }
 });
 
+// Get all workers with pending salaries
+router.get('/all-pending-salaries', authenticate, requireRole(1, 2, 3), async (req, res) => {
+  try {
+    if (!req.user.organization) {
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    // Build filter for pending salary entries
+    const pendingFilter = {
+      organization: req.user.organization,
+      category: 'pending_salary',
+      status: 'pending'
+    };
+
+    // Apply role-based access control
+    if (req.user.role === 2 || req.user.role === 3) {
+      // Supervisor/Engineer can only see their team's pending salaries
+      const childIds = await req.user.getChildIds();
+      pendingFilter.worker = { $in: childIds };
+    }
+    // Role 1 (Admin) can see all - no additional filter needed
+
+    // Get all pending salary entries
+    const allPendingEntries = await WorkerLedger.find(pendingFilter)
+      .populate('worker', 'name email dailyRate')
+      .sort({ transactionDate: -1 });
+
+    // Group by worker
+    const workerMap = new Map();
+
+    for (const entry of allPendingEntries) {
+      if (!entry.worker) continue; // Skip if worker was deleted
+
+      const workerId = entry.worker._id.toString();
+
+      if (!workerMap.has(workerId)) {
+        workerMap.set(workerId, {
+          worker: entry.worker,
+          pendingEntries: [],
+          totalPending: 0
+        });
+      }
+
+      const workerData = workerMap.get(workerId);
+      workerData.pendingEntries.push(entry);
+      workerData.totalPending += entry.amount;
+    }
+
+    // Calculate advances for each worker
+    const workersWithPending = [];
+
+    for (const [workerId, data] of workerMap) {
+      // Get unpaid advances
+      const advances = await WorkerLedger.find({
+        organization: req.user.organization,
+        worker: workerId,
+        category: 'advance',
+        type: 'credit'
+      });
+
+      const unpaidAdvances = [];
+      for (const advance of advances) {
+        const deduction = await WorkerLedger.findOne({
+          linkedAdvance: advance._id,
+          category: 'deduction'
+        });
+
+        if (!deduction) {
+          unpaidAdvances.push(advance);
+        }
+      }
+
+      const totalAdvances = unpaidAdvances.reduce((sum, a) => sum + a.amount, 0);
+      const netPayable = data.totalPending - totalAdvances;
+
+      workersWithPending.push({
+        worker: {
+          _id: data.worker._id,
+          name: data.worker.name,
+          email: data.worker.email,
+          dailyRate: data.worker.dailyRate
+        },
+        totalPending: data.totalPending,
+        totalAdvances,
+        netPayable,
+        attendanceCount: data.pendingEntries.length,
+        pendingEntries: data.pendingEntries.map(e => ({
+          _id: e._id,
+          amount: e.amount,
+          transactionDate: e.transactionDate
+        }))
+      });
+    }
+
+    // Sort by net payable descending
+    workersWithPending.sort((a, b) => b.netPayable - a.netPayable);
+
+    res.json({
+      workers: workersWithPending,
+      summary: {
+        totalWorkers: workersWithPending.length,
+        totalPending: workersWithPending.reduce((sum, w) => sum + w.totalPending, 0),
+        totalAdvances: workersWithPending.reduce((sum, w) => sum + w.totalAdvances, 0),
+        totalNetPayable: workersWithPending.reduce((sum, w) => sum + w.netPayable, 0)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get single entry
 router.get('/:id', authenticate, async (req, res) => {
   try {
@@ -550,7 +661,6 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
     // Mark pending salaries as paid
     for (const entry of pendingEntries) {
       entry.status = 'paid';
-      entry.fundAllocation = fundAllocationId;
       entry.paidDate = now;
       await entry.save({ session });
     }
@@ -634,117 +744,6 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get all workers with pending salaries
-router.get('/all-pending-salaries', authenticate, requireRole(1, 2, 3), async (req, res) => {
-  try {
-    if (!req.user.organization) {
-      return res.status(400).json({ message: 'No organization assigned' });
-    }
-
-    // Build filter for pending salary entries
-    const pendingFilter = {
-      organization: req.user.organization,
-      category: 'pending_salary',
-      status: 'pending'
-    };
-
-    // Apply role-based access control
-    if (req.user.role === 2 || req.user.role === 3) {
-      // Supervisor/Engineer can only see their team's pending salaries
-      const childIds = await req.user.getChildIds();
-      pendingFilter.worker = { $in: childIds };
-    }
-    // Role 1 (Admin) can see all - no additional filter needed
-
-    // Get all pending salary entries
-    const allPendingEntries = await WorkerLedger.find(pendingFilter)
-      .populate('worker', 'name email dailyRate')
-      .sort({ transactionDate: -1 });
-
-    // Group by worker
-    const workerMap = new Map();
-
-    for (const entry of allPendingEntries) {
-      if (!entry.worker) continue; // Skip if worker was deleted
-
-      const workerId = entry.worker._id.toString();
-
-      if (!workerMap.has(workerId)) {
-        workerMap.set(workerId, {
-          worker: entry.worker,
-          pendingEntries: [],
-          totalPending: 0
-        });
-      }
-
-      const workerData = workerMap.get(workerId);
-      workerData.pendingEntries.push(entry);
-      workerData.totalPending += entry.amount;
-    }
-
-    // Calculate advances for each worker
-    const workersWithPending = [];
-
-    for (const [workerId, data] of workerMap) {
-      // Get unpaid advances
-      const advances = await WorkerLedger.find({
-        organization: req.user.organization,
-        worker: workerId,
-        category: 'advance',
-        type: 'credit'
-      });
-
-      const unpaidAdvances = [];
-      for (const advance of advances) {
-        const deduction = await WorkerLedger.findOne({
-          linkedAdvance: advance._id,
-          category: 'deduction'
-        });
-
-        if (!deduction) {
-          unpaidAdvances.push(advance);
-        }
-      }
-
-      const totalAdvances = unpaidAdvances.reduce((sum, a) => sum + a.amount, 0);
-      const netPayable = data.totalPending - totalAdvances;
-
-      workersWithPending.push({
-        worker: {
-          _id: data.worker._id,
-          name: data.worker.name,
-          email: data.worker.email,
-          dailyRate: data.worker.dailyRate
-        },
-        totalPending: data.totalPending,
-        totalAdvances,
-        netPayable,
-        attendanceCount: data.pendingEntries.length,
-        pendingEntries: data.pendingEntries.map(e => ({
-          _id: e._id,
-          amount: e.amount,
-          transactionDate: e.transactionDate
-        }))
-      });
-    }
-
-    // Sort by net payable descending
-    workersWithPending.sort((a, b) => b.netPayable - a.netPayable);
-
-    res.json({
-      workers: workersWithPending,
-      summary: {
-        totalWorkers: workersWithPending.length,
-        totalPending: workersWithPending.reduce((sum, w) => sum + w.totalPending, 0),
-        totalAdvances: workersWithPending.reduce((sum, w) => sum + w.totalAdvances, 0),
-        totalNetPayable: workersWithPending.reduce((sum, w) => sum + w.netPayable, 0)
-      }
-    });
-  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
@@ -860,7 +859,6 @@ router.post('/bulk-pay-salary', authenticate, requireRole(1, 2, 3), async (req, 
       // Mark pending salaries as paid
       for (const entry of pendingEntries) {
         entry.status = 'paid';
-        entry.fundAllocation = fundAllocationId;
         entry.paidDate = now;
         await entry.save({ session });
       }

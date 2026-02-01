@@ -352,12 +352,12 @@ export default function Bills() {
             Track and manage all bills with GST details
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <Button variant="outline" onClick={handleExport} disabled={exporting} className="w-full sm:w-auto">
             <Download className="h-4 w-4 mr-2" />
             {exporting ? 'Exporting...' : 'Export CSV'}
           </Button>
-          <Button onClick={() => { resetForm(); setIsAddOpen(true); }}>
+          <Button onClick={() => { resetForm(); setIsAddOpen(true); }} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
             Add Bill
           </Button>
@@ -498,19 +498,20 @@ export default function Bills() {
           <CardTitle>Bills</CardTitle>
           <CardDescription>Showing {bills.length} of {pagination.total} entries</CardDescription>
         </CardHeader>
-        <Table>
+        <div className="overflow-x-auto">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead>Vendor</TableHead>
-              <TableHead>Invoice</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="text-right">Base</TableHead>
-              <TableHead className="text-right">GST</TableHead>
+              <TableHead className="hidden md:table-cell">Invoice</TableHead>
+              <TableHead className="hidden sm:table-cell">Site</TableHead>
+              <TableHead className="hidden lg:table-cell">Type</TableHead>
+              <TableHead className="hidden lg:table-cell text-right">Base</TableHead>
+              <TableHead className="hidden lg:table-cell text-right">GST</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Receipt</TableHead>
+              <TableHead className="hidden md:table-cell">Receipt</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -532,8 +533,8 @@ export default function Bills() {
             ) : (
               bills.map((bill) => (
                 <TableRow key={bill._id}>
-                  <TableCell>{formatDate(bill.billDate)}</TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">{formatDate(bill.billDate)}</TableCell>
+                  <TableCell className="min-w-[150px]">
                     <div>
                       <p className="font-medium">{bill.vendorName}</p>
                       {bill.vendorGstNumber && (
@@ -541,16 +542,16 @@ export default function Bills() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell>{bill.invoiceNumber || '-'}</TableCell>
-                  <TableCell>{bill.site?.name || '-'}</TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">{bill.invoiceNumber || '-'}</TableCell>
+                  <TableCell className="hidden sm:table-cell">{bill.site?.name || '-'}</TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Badge variant="outline">
                       {BILL_TYPES.find(t => t.value === bill.billType)?.label}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">{formatCurrency(bill.baseAmount)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(bill.gstAmount)}</TableCell>
-                  <TableCell className="text-right font-bold">{formatCurrency(bill.totalAmount)}</TableCell>
+                  <TableCell className="hidden lg:table-cell text-right">{formatCurrency(bill.baseAmount)}</TableCell>
+                  <TableCell className="hidden lg:table-cell text-right">{formatCurrency(bill.gstAmount)}</TableCell>
+                  <TableCell className="text-right font-bold whitespace-nowrap">{formatCurrency(bill.totalAmount)}</TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">
                       <Badge className={STATUS_COLORS[bill.status]}>{bill.status}</Badge>
@@ -562,7 +563,7 @@ export default function Bills() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {bill.receiptPath ? (
                       <a
                         href={bill.receiptPath}
@@ -635,6 +636,7 @@ export default function Bills() {
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Pagination */}

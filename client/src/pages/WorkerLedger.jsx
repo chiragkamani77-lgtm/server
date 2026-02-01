@@ -50,9 +50,6 @@ const CATEGORIES = [
   { value: 'pending_salary', label: 'Pending Salary' },
   { value: 'advance', label: 'Advance' },
   { value: 'bonus', label: 'Bonus' },
-  { value: 'deduction', label: 'Deduction' },
-  { value: 'reimbursement', label: 'Reimbursement' },
-  { value: 'other', label: 'Other' },
 ]
 
 const PAYMENT_MODES = [
@@ -110,6 +107,7 @@ export default function WorkerLedger() {
     fundAllocationId: '',
     amount: '',
     deductAdvances: true,
+    partialPayment: false,
     paymentMode: 'cash',
     referenceNumber: '',
     notes: '',
@@ -124,6 +122,7 @@ export default function WorkerLedger() {
 
   useEffect(() => {
     fetchInitialData()
+    fetchOverallSummary()
   }, [])
 
   useEffect(() => {
@@ -350,6 +349,7 @@ export default function WorkerLedger() {
       fundAllocationId: '',
       amount: '',
       deductAdvances: true,
+      partialPayment: false,
       paymentMode: 'cash',
       referenceNumber: '',
       notes: '',
@@ -365,8 +365,18 @@ export default function WorkerLedger() {
       ...paySalaryForm,
       amount: netPayable > 0 ? netPayable.toString() : '',
       deductAdvances: true,
+      partialPayment: false,
     })
     setIsPaySalaryOpen(true)
+  }
+
+  const fetchOverallSummary = async () => {
+    try {
+      const { data } = await ledgerApi.getAllPendingSalaries()
+      setBulkSummary(data.summary || null)
+    } catch (error) {
+      console.error('Error fetching overall summary:', error)
+    }
   }
 
   const fetchAllPendingSalaries = async () => {
@@ -475,12 +485,12 @@ export default function WorkerLedger() {
           </p>
         </div>
         {(isAdmin || isSupervisor) && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={openBulkPayDialog}>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={openBulkPayDialog} className="w-full sm:w-auto">
               <Wallet className="h-4 w-4 mr-2" />
               Bulk Pay Salary
             </Button>
-            <Button onClick={() => setIsAddOpen(true)}>
+            <Button onClick={() => setIsAddOpen(true)} className="w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />
               Add Entry
             </Button>
@@ -488,51 +498,48 @@ export default function WorkerLedger() {
         )}
       </div>
 
-      {/* Summary Cards */}
+      {/* Real-time Summary Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Entries</CardTitle>
-            <Wallet className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Workers with Pending</CardTitle>
+            <Wallet className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{pagination.total}</div>
+            <div className="text-2xl font-bold">{bulkSummary?.totalWorkers || 0}</div>
+            <p className="text-xs text-muted-foreground">Need salary payment</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Credits (Page)</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-500" />
+            <CardTitle className="text-sm font-medium">Total Pending Salary</CardTitle>
+            <TrendingUp className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{formatCurrency(totalCredits)}</div>
+            <div className="text-2xl font-bold text-orange-600">{formatCurrency(bulkSummary?.totalPending || 0)}</div>
+            <p className="text-xs text-muted-foreground">From attendance</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Debits (Page)</CardTitle>
+            <CardTitle className="text-sm font-medium">Outstanding Advances</CardTitle>
             <TrendingDown className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{formatCurrency(totalDebits)}</div>
+            <div className="text-2xl font-bold text-red-600">{formatCurrency(bulkSummary?.totalAdvances || 0)}</div>
+            <p className="text-xs text-muted-foreground">To be deducted</p>
           </CardContent>
         </Card>
-        {selectedWorkerBalance && (
-          <Card className="border-primary">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{selectedWorkerBalance.worker.name}'s Balance</CardTitle>
-              <Wallet className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${selectedWorkerBalance.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(Math.abs(selectedWorkerBalance.balance))}
-                <span className="text-sm font-normal ml-1">
-                  {selectedWorkerBalance.balance >= 0 ? '(Due to worker)' : '(Due from worker)'}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <Card className="border-green-300 bg-green-50">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Net Payable</CardTitle>
+            <Wallet className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-700">{formatCurrency(bulkSummary?.totalNetPayable || 0)}</div>
+            <p className="text-xs text-muted-foreground">After advance deductions</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Pending Salary Summary Card */}
@@ -842,7 +849,14 @@ export default function WorkerLedger() {
                 <Label>Worker *</Label>
                 <Select
                   value={form.workerId}
-                  onValueChange={(value) => setForm({ ...form, workerId: value })}
+                  onValueChange={(value) => {
+                    // Auto-select worker's first assigned site
+                    const workerSites = sites.filter(site =>
+                      site.assignedUsers?.some(userId => userId === value)
+                    )
+                    const firstSiteId = workerSites.length > 0 ? workerSites[0]._id : ''
+                    setForm({ ...form, workerId: value, siteId: firstSiteId })
+                  }}
                   required
                 >
                   <SelectTrigger>
@@ -855,38 +869,27 @@ export default function WorkerLedger() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Type *</Label>
-                  <Select
-                    value={form.type}
-                    onValueChange={(value) => setForm({ ...form, type: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="credit">Credit (Payment to worker)</SelectItem>
-                      {/* <SelectItem value="debit">Debit (Advance/Due from worker)</SelectItem> */}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Category *</Label>
-                  <Select
-                    value={form.category}
-                    onValueChange={(value) => setForm({ ...form, category: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CATEGORIES.map((cat) => (
-                        <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label>Category *</Label>
+                <Select
+                  value={form.category}
+                  onValueChange={(value) => {
+                    // All categories are credit (payment to worker)
+                    setForm({ ...form, category: value, type: 'credit' })
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((cat) => (
+                      <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  ↑ Payment to worker
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -1029,6 +1032,28 @@ export default function WorkerLedger() {
                 </div>
               )}
               <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="partialPayment"
+                    checked={paySalaryForm.partialPayment}
+                    onChange={(e) => {
+                      const isPartial = e.target.checked
+                      const netPayable = selectedWorkerPendingSalary?.netPayable || 0
+                      setPaySalaryForm({
+                        ...paySalaryForm,
+                        partialPayment: isPartial,
+                        amount: isPartial ? '' : (netPayable > 0 ? netPayable.toString() : '')
+                      })
+                    }}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="partialPayment" className="text-sm font-normal cursor-pointer">
+                    Partial payment (pay less than full amount)
+                  </Label>
+                </div>
+              </div>
+              <div className="space-y-2">
                 <Label>Amount to Pay (Rs.) *</Label>
                 <Input
                   type="number"
@@ -1038,9 +1063,14 @@ export default function WorkerLedger() {
                   required
                   min="0"
                   step="0.01"
+                  disabled={!paySalaryForm.partialPayment}
+                  className={!paySalaryForm.partialPayment ? 'bg-green-50 font-semibold' : ''}
                 />
                 <p className="text-xs text-muted-foreground">
-                  You can pay partial or full amount
+                  {paySalaryForm.partialPayment
+                    ? '✏️ Enter custom amount for partial payment'
+                    : `✓ Full payment: ${formatCurrency(selectedWorkerPendingSalary?.netPayable || 0)}`
+                  }
                 </p>
               </div>
               <div className="space-y-2">

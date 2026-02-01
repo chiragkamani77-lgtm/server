@@ -707,7 +707,12 @@ router.get('/flow/summary', authenticate, async (req, res) => {
     ]);
 
     const ledgerTotal = await WorkerLedger.aggregate([
-      { $match: { organization: req.user.organization } },
+      {
+        $match: {
+          organization: req.user.organization,
+          fundAllocation: { $exists: true, $ne: null }
+        }
+      },
       {
         $group: {
           _id: '$type',

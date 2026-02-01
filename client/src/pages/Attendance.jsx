@@ -346,14 +346,14 @@ export default function Attendance() {
             Track worker attendance and work hours
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           {workers.length > 0 && (
-            <Button variant="outline" onClick={initBulkRecords}>
+            <Button variant="outline" onClick={initBulkRecords} className="w-full sm:w-auto">
               <Users className="h-4 w-4 mr-2" />
               Bulk Entry
             </Button>
           )}
-          <Button onClick={() => setIsAddOpen(true)}>
+          <Button onClick={() => setIsAddOpen(true)} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
             Add Record
           </Button>
