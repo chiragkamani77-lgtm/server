@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
   TableBody,
@@ -40,8 +41,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
+import { useBulkSelect } from '@/hooks/use-bulk-select'
+import { useLoading } from '@/hooks/use-loading'
 import { formatDate, formatCurrency } from '@/lib/utils'
-import { Plus, Users, Calendar, Clock, CheckCircle, XCircle, Filter, ChevronLeft, ChevronRight, Trash2, Edit } from 'lucide-react'
+import { Plus, Users, Calendar, Clock, CheckCircle, XCircle, Filter, ChevronLeft, ChevronRight, Trash2, Edit, Download, Upload, FileSpreadsheet } from 'lucide-react'
 
 const STATUS_COLORS = {
   present: 'bg-green-100 text-green-800',
@@ -63,6 +66,12 @@ export default function Attendance() {
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [isBulkOpen, setIsBulkOpen] = useState(false)
+  const [isExportOpen, setIsExportOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importFile, setImportFile] = useState(null)
+  const [importResult, setImportResult] = useState(null)
 
   const [filters, setFilters] = useState({
     siteId: '',
@@ -70,6 +79,25 @@ export default function Attendance() {
     status: '',
     date: '',
   })
+
+  // Use custom hooks
+  const loadingStates = useLoading()
+  const bulkSelect = useBulkSelect(
+    records,
+    attendanceApi.bulkDelete,
+    (count) => {
+      toast({ title: `${count} attendance record(s) deleted successfully` })
+      fetchRecords()
+    },
+    (error) => {
+      console.error('Bulk delete error:', error)
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete records',
+        variant: 'destructive',
+      })
+    }
+  )
 
   const [form, setForm] = useState({
     workerId: '',
@@ -93,6 +121,19 @@ export default function Attendance() {
     siteId: '',
     date: new Date().toISOString().split('T')[0],
     records: [],
+  })
+
+  const currentDate = new Date()
+  const [exportForm, setExportForm] = useState({
+    year: currentDate.getFullYear(),
+    month: currentDate.getMonth() + 1,
+    siteId: '',
+  })
+
+  const [importForm, setImportForm] = useState({
+    year: currentDate.getFullYear(),
+    month: currentDate.getMonth() + 1,
+    siteId: '',
   })
 
   useEffect(() => {
@@ -330,6 +371,109 @@ export default function Attendance() {
     setPagination({ ...pagination, page: 1 })
   }
 
+  const handleExport = async () => {
+    if (!exportForm.siteId) {
+      toast({
+        title: 'Error',
+        description: 'Please select a site to export',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      setExporting(true)
+      const response = await attendanceApi.exportTemplate({
+        year: exportForm.year,
+        month: exportForm.month,
+        siteId: exportForm.siteId
+      })
+
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      const site = sites.find(s => s._id === exportForm.siteId)
+      const siteName = site?.name || 'export'
+      link.setAttribute('download', `attendance-${exportForm.year}-${String(exportForm.month).padStart(2, '0')}-${siteName.replace(/\s+/g, '-')}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+
+      toast({ title: 'Attendance sheet exported successfully' })
+      setIsExportOpen(false)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to export attendance sheet',
+        variant: 'destructive',
+      })
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!importForm.siteId) {
+      toast({
+        title: 'Error',
+        description: 'Please select a site',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (!importFile) {
+      toast({
+        title: 'Error',
+        description: 'Please select a file to import',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      setImporting(true)
+      setImportResult(null)
+
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        try {
+          const csvData = e.target.result
+          const response = await attendanceApi.importSheet({
+            csvData,
+            year: importForm.year,
+            month: importForm.month,
+            siteId: importForm.siteId
+          })
+
+          setImportResult(response.data.results)
+          toast({
+            title: 'Import completed',
+            description: response.data.message
+          })
+          fetchRecords()
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.response?.data?.message || 'Failed to import attendance sheet',
+            variant: 'destructive',
+          })
+        } finally {
+          setImporting(false)
+        }
+      }
+      reader.readAsText(importFile)
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to read file',
+        variant: 'destructive',
+      })
+      setImporting(false)
+    }
+  }
+
   // Calculate summary
   const todayRecords = records.filter(r =>
     new Date(r.date).toDateString() === new Date().toDateString()
@@ -347,15 +491,34 @@ export default function Attendance() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {bulkSelect.selectedCount > 0 && (
+            <Button
+              variant="destructive"
+              onClick={bulkSelect.deleteSelected}
+              disabled={bulkSelect.deleting}
+              className="w-full sm:w-auto"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {bulkSelect.deleting ? 'Deleting...' : `Delete ${bulkSelect.selectedCount}`}
+            </Button>
+          )}
           {workers.length > 0 && (
             <Button variant="outline" onClick={initBulkRecords} className="w-full sm:w-auto">
               <Users className="h-4 w-4 mr-2" />
               Bulk Entry
             </Button>
           )}
-          <Button onClick={() => setIsAddOpen(true)} className="w-full sm:w-auto">
+          <Button variant="outline" onClick={() => setIsExportOpen(true)} className="w-full sm:w-auto">
+            <Download className="h-4 w-4 mr-2" />
+            Export Sheet
+          </Button>
+          <Button variant="outline" onClick={() => setIsImportOpen(true)} className="w-full sm:w-auto">
+            <Upload className="h-4 w-4 mr-2" />
+            Import Sheet
+          </Button>
+          <Button onClick={() => setIsAddOpen(true)} disabled={loadingStates.creating} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
-            Add Record
+            {loadingStates.creating ? 'Adding...' : 'Add Record'}
           </Button>
         </div>
       </div>
@@ -501,6 +664,13 @@ export default function Attendance() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={bulkSelect.isAllSelected()}
+                  onCheckedChange={bulkSelect.toggleSelectAll}
+                  aria-label="Select all"
+                />
+              </TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Worker</TableHead>
               <TableHead>Site</TableHead>
@@ -516,7 +686,7 @@ export default function Attendance() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8">
+                <TableCell colSpan={11} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -524,13 +694,20 @@ export default function Attendance() {
               </TableRow>
             ) : records.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   No attendance records found
                 </TableCell>
               </TableRow>
             ) : (
               records.map((record) => (
                 <TableRow key={record._id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={bulkSelect.isSelected(record._id)}
+                      onCheckedChange={() => bulkSelect.toggleSelect(record._id)}
+                      aria-label={`Select ${record.worker?.name}`}
+                    />
+                  </TableCell>
                   <TableCell>{formatDate(record.date)}</TableCell>
                   <TableCell className="font-medium">{record.worker?.name}</TableCell>
                   <TableCell>{record.site?.name || '-'}</TableCell>
@@ -890,6 +1067,210 @@ export default function Attendance() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Export Dialog */}
+      <Dialog open={isExportOpen} onOpenChange={setIsExportOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" />
+              Export Attendance Sheet
+            </DialogTitle>
+            <DialogDescription>
+              Download a monthly attendance template that you can fill offline and import back
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Year</Label>
+                <Input
+                  type="number"
+                  value={exportForm.year}
+                  onChange={(e) => setExportForm({ ...exportForm, year: parseInt(e.target.value) })}
+                  min="2020"
+                  max="2099"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Month</Label>
+                <Select
+                  value={exportForm.month.toString()}
+                  onValueChange={(value) => setExportForm({ ...exportForm, month: parseInt(value) })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <SelectItem key={i + 1} value={(i + 1).toString()}>
+                        {new Date(2000, i).toLocaleString('default', { month: 'long' })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Site *</Label>
+              <Select
+                value={exportForm.siteId}
+                onValueChange={(value) => setExportForm({ ...exportForm, siteId: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select site" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sites.map((site) => (
+                    <SelectItem key={site._id} value={site._id}>{site.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> The exported CSV will include all workers for the selected site.
+                Each day of the month will be a column. Format for each cell: status|hours|overtime|notes
+                (e.g., "present|8|0|")
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsExportOpen(false)}>Cancel</Button>
+            <Button onClick={handleExport} disabled={exporting}>
+              <Download className="h-4 w-4 mr-2" />
+              {exporting ? 'Exporting...' : 'Export'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Dialog */}
+      <Dialog open={isImportOpen} onOpenChange={(open) => {
+        setIsImportOpen(open)
+        if (!open) {
+          setImportFile(null)
+          setImportResult(null)
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5" />
+              Import Attendance Sheet
+            </DialogTitle>
+            <DialogDescription>
+              Upload a filled attendance sheet to bulk import attendance records
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Year</Label>
+                <Input
+                  type="number"
+                  value={importForm.year}
+                  onChange={(e) => setImportForm({ ...importForm, year: parseInt(e.target.value) })}
+                  min="2020"
+                  max="2099"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Month</Label>
+                <Select
+                  value={importForm.month.toString()}
+                  onValueChange={(value) => setImportForm({ ...importForm, month: parseInt(value) })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <SelectItem key={i + 1} value={(i + 1).toString()}>
+                        {new Date(2000, i).toLocaleString('default', { month: 'long' })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Site *</Label>
+              <Select
+                value={importForm.siteId}
+                onValueChange={(value) => setImportForm({ ...importForm, siteId: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select site" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sites.map((site) => (
+                    <SelectItem key={site._id} value={site._id}>{site.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>CSV File *</Label>
+              <Input
+                type="file"
+                accept=".csv"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+              <p className="text-sm text-yellow-800">
+                <strong>Instructions:</strong>
+              </p>
+              <ul className="text-sm text-yellow-800 list-disc list-inside mt-2 space-y-1">
+                <li>Use the exported template format</li>
+                <li>Each cell format: status|hours|overtime|notes</li>
+                <li>Valid status: present, absent, half_day, leave</li>
+                <li>Leave cells empty to skip days</li>
+                <li>Existing records will be updated</li>
+              </ul>
+            </div>
+            {importResult && (
+              <div className="space-y-2">
+                <Label>Import Results</Label>
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Created</p>
+                      <p className="text-2xl font-bold text-green-600">{importResult.created}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Updated</p>
+                      <p className="text-2xl font-bold text-blue-600">{importResult.updated}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Skipped</p>
+                      <p className="text-2xl font-bold text-gray-600">{importResult.skipped}</p>
+                    </div>
+                  </div>
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-sm font-semibold text-red-600 mb-2">Errors ({importResult.errors.length}):</p>
+                      <div className="max-h-40 overflow-y-auto">
+                        {importResult.errors.map((error, idx) => (
+                          <p key={idx} className="text-xs text-red-600">{error}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsImportOpen(false)}>Cancel</Button>
+            <Button onClick={handleImport} disabled={importing || !importFile}>
+              <Upload className="h-4 w-4 mr-2" />
+              {importing ? 'Importing...' : 'Import'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

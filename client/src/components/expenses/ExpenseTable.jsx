@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { expensesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
   TableBody,
@@ -66,6 +67,7 @@ export function ExpenseTable({
   onRefresh,
   siteId = null,
   showSiteColumn = true,
+  bulkSelect = null,
 }) {
   const permissions = useExpensePermissions()
   const { toast } = useToast()
@@ -188,6 +190,15 @@ export function ExpenseTable({
         <Table>
           <TableHeader>
             <TableRow>
+              {bulkSelect && (
+                <TableHead className="w-12">
+                  <Checkbox
+                    checked={bulkSelect.isAllSelected()}
+                    onCheckedChange={bulkSelect.toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                </TableHead>
+              )}
               <TableHead>Date</TableHead>
               {showSiteColumn && <TableHead>Site</TableHead>}
               <TableHead>Category</TableHead>
@@ -202,6 +213,15 @@ export function ExpenseTable({
           <TableBody>
             {expenses.map((expense) => (
               <TableRow key={expense._id}>
+                {bulkSelect && (
+                  <TableCell>
+                    <Checkbox
+                      checked={bulkSelect.isSelected(expense._id)}
+                      onCheckedChange={() => bulkSelect.toggleSelect(expense._id)}
+                      aria-label={`Select ${expense.description}`}
+                    />
+                  </TableCell>
+                )}
                 <TableCell className="whitespace-nowrap">
                   {formatDate(expense.expenseDate)}
                 </TableCell>

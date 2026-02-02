@@ -170,7 +170,7 @@ export function InvestmentSelector({
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            Investment is required. All bills must be linked to an investment.
+            Bills can be paid from either a Fund Allocation (user's wallet) or an Investment. At least one is required.
           </AlertDescription>
         </Alert>
       )}

@@ -3,6 +3,7 @@ import { WorkerLedger, User, Site, Contract, FundAllocation } from '../models/in
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateFundAvailability } from './funds.js';
 import mongoose from 'mongoose';
+import { debitWallet } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
@@ -261,16 +262,21 @@ router.get('/pending-salary/:workerId', authenticate, async (req, res) => {
 
 // Create ledger entry (Developer, Engineer, Supervisor)
 router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     if (!req.user.organization) {
+      await session.abortTransaction();
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
     const { workerId, siteId, type, amount, category, description, transactionDate, referenceNumber, paymentMode, fundAllocationId, contractId } = req.body;
 
     // Verify worker
-    const worker = await User.findById(workerId);
+    const worker = await User.findById(workerId).session(session);
     if (!worker) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Worker not found' });
     }
 
@@ -278,22 +284,25 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
     if (req.user.role === 2 || req.user.role === 3) {
       const childIds = await req.user.getChildIds();
       if (!childIds.some(id => id.toString() === workerId)) {
+        await session.abortTransaction();
         return res.status(403).json({ message: 'Can only manage ledger for your team members' });
       }
     }
 
     // Verify site if provided
     if (siteId) {
-      const site = await Site.findById(siteId);
+      const site = await Site.findById(siteId).session(session);
       if (!site) {
+        await session.abortTransaction();
         return res.status(404).json({ message: 'Site not found' });
       }
     }
 
     // Verify contract if provided
     if (contractId) {
-      const contract = await Contract.findById(contractId);
+      const contract = await Contract.findById(contractId).session(session);
       if (!contract) {
+        await session.abortTransaction();
         return res.status(404).json({ message: 'Contract not found' });
       }
     }
@@ -314,7 +323,16 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
       paymentMode
     });
 
-    await entry.save();
+    await entry.save({ session });
+
+    // Debit wallet for tracking if this is a credit entry (money going out to worker)
+    // Credit entries include: advance, bonus, salary (if manually created)
+    if (type === 'credit' && amount > 0) {
+      await debitWallet(req.user._id, amount, session, true); // allowNegative=true
+    }
+
+    await session.commitTransaction();
+
     await entry.populate('worker', 'name email role');
     if (siteId) await entry.populate('site', 'name');
     await entry.populate('createdBy', 'name');
@@ -323,7 +341,10 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
 
     res.status(201).json(entry);
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -709,6 +730,9 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
 
       await payment.save({ session });
       paymentEntries.push(payment);
+
+      // Debit wallet for tracking (validated against fund allocation above)
+      await debitWallet(req.user._id, netPayable, session, true); // allowNegative=true
     }
 
     await session.commitTransaction();
@@ -927,6 +951,11 @@ router.post('/bulk-pay-salary', authenticate, requireRole(1, 2, 3), async (req, 
       });
     }
 
+    // Debit wallet for tracking (validated against fund allocation above)
+    if (totalNetPayable > 0) {
+      await debitWallet(req.user._id, totalNetPayable, session, true); // allowNegative=true
+    }
+
     await session.commitTransaction();
     session.endSession();
 
@@ -945,6 +974,38 @@ router.post('/bulk-pay-salary', authenticate, requireRole(1, 2, 3), async (req, 
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Bulk delete worker ledger entries
+router.post('/bulk-delete', authenticate, requireRole(1, 2, 3), async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'IDs array is required and cannot be empty' });
+    }
+
+    // Verify all entries belong to the user's organization
+    const entries = await WorkerLedger.find({
+      _id: { $in: ids },
+      organization: req.user.organization
+    });
+
+    if (entries.length !== ids.length) {
+      return res.status(403).json({ message: 'Some entries do not belong to your organization' });
+    }
+
+    // Delete the entries
+    await WorkerLedger.deleteMany({ _id: { $in: ids } });
+
+    res.json({
+      success: true,
+      message: `${ids.length} ledger entry(ies) deleted successfully`,
+      deletedCount: ids.length
+    });
+  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });

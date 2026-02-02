@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, Wallet, PiggyBank, ChevronLeft, ChevronRight, Trash2, Edit, Receipt, Users, Building2, ArrowRight } from 'lucide-react'
+import { Plus, TrendingUp, Wallet, PiggyBank, ChevronLeft, ChevronRight, Trash2, Edit, Receipt, Users, Building2, ArrowRight, ArrowDownToLine } from 'lucide-react'
 
 const PAYMENT_MODES = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -52,6 +52,7 @@ export default function Investments() {
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
 
   const [form, setForm] = useState({
@@ -62,6 +63,15 @@ export default function Investments() {
     referenceNumber: '',
     paymentMode: 'bank_transfer',
   })
+
+  const [withdrawForm, setWithdrawForm] = useState({
+    partnerId: '',
+    amount: '',
+    description: '',
+    referenceNumber: '',
+    paymentMode: 'bank_transfer',
+  })
+  const [withdrawing, setWithdrawing] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -174,6 +184,45 @@ export default function Investments() {
     setEditingId(null)
   }
 
+  const handleWithdraw = async (e) => {
+    e.preventDefault()
+    setWithdrawing(true)
+    try {
+      const response = await investmentsApi.withdraw({
+        partnerId: withdrawForm.partnerId,
+        amount: parseFloat(withdrawForm.amount),
+        description: withdrawForm.description,
+        referenceNumber: withdrawForm.referenceNumber,
+        paymentMode: withdrawForm.paymentMode,
+      })
+      toast({
+        title: 'Withdrawal successful',
+        description: `${formatCurrency(withdrawForm.amount)} credited to your wallet`
+      })
+      setIsWithdrawOpen(false)
+      resetWithdrawForm()
+      fetchData()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to process withdrawal',
+        variant: 'destructive',
+      })
+    } finally {
+      setWithdrawing(false)
+    }
+  }
+
+  const resetWithdrawForm = () => {
+    setWithdrawForm({
+      partnerId: '',
+      amount: '',
+      description: '',
+      referenceNumber: '',
+      paymentMode: 'bank_transfer',
+    })
+  }
+
   if (!isAdmin) {
     return (
       <div className="text-center py-12">
@@ -184,72 +233,89 @@ export default function Investments() {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="space-y-4 md:space-y-6 p-3 md:p-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Partner Investments</h1>
-          <p className="text-muted-foreground text-sm md:text-base">
+          <h1 className="text-xl md:text-3xl font-bold">Partner Investments</h1>
+          <p className="text-muted-foreground text-xs md:text-base">
             Track partner contributions and fund usage
           </p>
         </div>
-        <Button onClick={() => { resetForm(); setIsAddOpen(true); }} className="w-full sm:w-auto">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Investment
-        </Button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          {summary && summary.remainingFunds > 0 && (
+            <Button
+              onClick={() => { resetWithdrawForm(); setIsWithdrawOpen(true); }}
+              variant="outline"
+              className="flex-1 sm:flex-initial text-green-600 hover:text-green-700 border-green-600 hover:border-green-700"
+              title={`Available: ${formatCurrency(summary.remainingFunds)}`}
+            >
+              <ArrowDownToLine className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Withdraw {formatCurrency(summary.remainingFunds)}</span>
+              <span className="sm:hidden">Withdraw</span>
+            </Button>
+          )}
+          <Button
+            onClick={() => { resetForm(); setIsAddOpen(true); }}
+            className="flex-1 sm:flex-initial"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Investment
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
       {summary && (
         <>
           {/* Main Summary Row */}
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
+          <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Invested</CardTitle>
-                <PiggyBank className="h-4 w-4 text-green-500" />
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+                <CardTitle className="text-xs md:text-sm font-medium">Total Invested</CardTitle>
+                <PiggyBank className="h-3 w-3 md:h-4 md:w-4 text-green-500" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalInvestment)}</div>
-                <p className="text-xs text-muted-foreground">{summary.partnerInvestments?.length || 0} partners</p>
+              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+                <div className="text-lg md:text-2xl font-bold text-green-600">{formatCurrency(summary.totalInvestment)}</div>
+                <p className="text-[10px] md:text-xs text-muted-foreground">{summary.partnerInvestments?.length || 0} partners</p>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Utilized</CardTitle>
-                <Wallet className="h-4 w-4 text-blue-500" />
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+                <CardTitle className="text-xs md:text-sm font-medium">Total Utilized</CardTitle>
+                <Wallet className="h-3 w-3 md:h-4 md:w-4 text-blue-500" />
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-blue-600">{formatCurrency(summary.totalExpenses)}</div>
-                <p className="text-xs text-muted-foreground">Across all categories</p>
+              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+                <div className="text-lg md:text-2xl font-bold text-blue-600">{formatCurrency(summary.totalExpenses)}</div>
+                <p className="text-[10px] md:text-xs text-muted-foreground">All categories</p>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Remaining Funds</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+                <CardTitle className="text-xs md:text-sm font-medium">Remaining</CardTitle>
+                <TrendingUp className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold ${summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+                <div className={`text-lg md:text-2xl font-bold ${summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatCurrency(summary.remainingFunds)}
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[10px] md:text-xs text-muted-foreground">
                   {summary.totalInvestment > 0
-                    ? `${((summary.remainingFunds / summary.totalInvestment) * 100).toFixed(1)}% remaining`
-                    : 'No investments yet'}
+                    ? `${((summary.remainingFunds / summary.totalInvestment) * 100).toFixed(1)}% left`
+                    : 'No investments'}
                 </p>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Utilization Rate</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+                <CardTitle className="text-xs md:text-sm font-medium">Utilization</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
+              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+                <div className="text-lg md:text-2xl font-bold">
                   {summary.totalInvestment > 0
                     ? `${((summary.totalExpenses / summary.totalInvestment) * 100).toFixed(1)}%`
                     : '0%'}
                 </div>
-                <p className="text-xs text-muted-foreground">Of total investment</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Of total</p>
               </CardContent>
             </Card>
           </div>
@@ -264,7 +330,7 @@ export default function Investments() {
               <CardDescription>How invested funds are being utilized</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
                 {/* Site Expenses */}
                 <div className="p-4 border rounded-lg bg-orange-50 dark:bg-orange-950">
                   <div className="flex items-center gap-2 mb-2">
@@ -309,6 +375,20 @@ export default function Investments() {
                     <p>Debits: {formatCurrency(summary.workerLedger?.debits || 0)}</p>
                   </div>
                 </div>
+
+                {/* Funds Allocated */}
+                <div className="p-4 border rounded-lg bg-cyan-50 dark:bg-cyan-950">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Wallet className="h-5 w-5 text-cyan-500" />
+                    <span className="font-medium">Funds Allocated</span>
+                  </div>
+                  <div className="text-2xl font-bold text-cyan-600">
+                    {formatCurrency(summary.fundAllocations?.totalDisbursed || 0)}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Disbursed to users
+                  </p>
+                </div>
               </div>
 
               {/* Fund Flow Visualization */}
@@ -331,8 +411,12 @@ export default function Investments() {
                     <span className="ml-4">- Labor & Salaries</span>
                     <span>- {formatCurrency(summary.workerLedger?.netPayable || 0)}</span>
                   </div>
+                  <div className="flex justify-between items-center text-sm text-muted-foreground">
+                    <span className="ml-4">- Funds Allocated</span>
+                    <span>- {formatCurrency(summary.fundAllocations?.totalDisbursed || 0)}</span>
+                  </div>
                   <div className="border-t pt-2 flex justify-between items-center font-medium">
-                    <span>Remaining Balance</span>
+                    <span>Available to Withdraw</span>
                     <span className={summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}>
                       = {formatCurrency(summary.remainingFunds)}
                     </span>
@@ -578,6 +662,123 @@ export default function Investments() {
             </div>
             <DialogFooter>
               <Button type="submit">{editingId ? 'Update' : 'Add'} Investment</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Withdraw Dialog */}
+      <Dialog open={isWithdrawOpen} onOpenChange={(open) => { setIsWithdrawOpen(open); if (!open) resetWithdrawForm(); }}>
+        <DialogContent className="max-w-md">
+          <form onSubmit={handleWithdraw}>
+            <DialogHeader>
+              <DialogTitle>Withdraw Available Funds</DialogTitle>
+              <DialogDescription>Withdraw from investment pool to your wallet</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {/* Available Funds Display */}
+              {summary && (
+                <div className="p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-green-900 dark:text-green-100">Available to Withdraw</p>
+                      <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                        Total: {formatCurrency(summary.totalInvestment)} - Utilized: {formatCurrency(summary.totalExpenses)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        {formatCurrency(summary.remainingFunds)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Partner *</Label>
+                <Select
+                  value={withdrawForm.partnerId}
+                  onValueChange={(value) => setWithdrawForm({ ...withdrawForm, partnerId: value })}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select partner withdrawing" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {partners.map((partner) => (
+                      <SelectItem key={partner._id} value={partner._id}>
+                        {partner.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Amount (Rs.) *</Label>
+                <Input
+                  type="number"
+                  value={withdrawForm.amount}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
+                  placeholder="Enter amount to withdraw"
+                  required
+                  min="1"
+                  max={summary?.remainingFunds || 0}
+                  step="0.01"
+                />
+                {summary && (
+                  <p className="text-xs text-muted-foreground">
+                    Maximum: {formatCurrency(summary.remainingFunds)}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea
+                  value={withdrawForm.description}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, description: e.target.value })}
+                  placeholder="Purpose of withdrawal (optional)"
+                  rows={3}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Reference Number</Label>
+                <Input
+                  value={withdrawForm.referenceNumber}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, referenceNumber: e.target.value })}
+                  placeholder="Transaction reference (optional)"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Payment Mode</Label>
+                <Select
+                  value={withdrawForm.paymentMode}
+                  onValueChange={(value) => setWithdrawForm({ ...withdrawForm, paymentMode: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_MODES.map((mode) => (
+                      <SelectItem key={mode.value} value={mode.value}>
+                        {mode.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsWithdrawOpen(false)} disabled={withdrawing}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={withdrawing} className="bg-green-600 hover:bg-green-700">
+                {withdrawing ? 'Processing...' : 'Withdraw to Wallet'}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

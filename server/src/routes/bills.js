@@ -4,6 +4,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import mongoose from 'mongoose';
 import { validateFundAvailability } from './funds.js';
+import { debitWallet } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
@@ -36,6 +37,7 @@ router.get('/', authenticate, async (req, res) => {
     const bills = await Bill.find(filter)
       .populate('site', 'name')
       .populate('createdBy', 'name email')
+      .populate('fundAllocation')
       .sort({ billDate: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
@@ -139,12 +141,8 @@ router.post('/', authenticate, async (req, res) => {
       gstRate
     } = req.body;
 
-    // Either fund allocation or investment is required
-    if (!fundAllocationId && !linkedInvestment) {
-      return res.status(400).json({
-        message: 'Either fund allocation or investment is required for all bills.'
-      });
-    }
+    // Fund allocation and investment are both optional
+    // Bills will be tracked via wallet and auto-investment creation on credit
 
     // Verify site access
     if (siteId) {
@@ -230,7 +228,8 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const bill = await Bill.findById(req.params.id)
       .populate('site', 'name')
-      .populate('createdBy', 'name email');
+      .populate('createdBy', 'name email')
+      .populate('fundAllocation');
 
     if (!bill) {
       return res.status(404).json({ message: 'Bill not found' });
@@ -275,6 +274,7 @@ router.put('/:id', authenticate, async (req, res) => {
       gstAmount,
       description,
       billType,
+      fundAllocationId,
       linkedInvestment,
       paymentMethod,
       paymentReference,
@@ -295,6 +295,7 @@ router.put('/:id', authenticate, async (req, res) => {
     }
     if (description !== undefined) bill.description = description;
     if (billType) bill.billType = billType;
+    if (fundAllocationId !== undefined) bill.fundAllocation = fundAllocationId || null;
     if (linkedInvestment !== undefined) bill.linkedInvestment = linkedInvestment || null;
     if (paymentMethod !== undefined) bill.paymentMethod = paymentMethod;
     if (paymentReference !== undefined) bill.paymentReference = paymentReference;
@@ -303,6 +304,7 @@ router.put('/:id', authenticate, async (req, res) => {
     await bill.save();
     await bill.populate('site', 'name');
     await bill.populate('createdBy', 'name email');
+    await bill.populate('fundAllocation');
 
     res.json(bill);
   } catch (error) {
@@ -422,6 +424,11 @@ router.put('/:id/status', authenticate, requireRole(1), async (req, res) => {
     if (status === 'credited') {
       bill.creditedDate = new Date();
 
+      // Debit wallet (fund tracking) when bill is credited
+      if (!['credited', 'paid'].includes(oldStatus)) {
+        await debitWallet(bill.createdBy, bill.totalAmount, session, true);
+      }
+
       // Auto-create investment when bill is credited (if not already created)
       if (oldStatus !== 'credited' && !bill.linkedInvestment) {
         try {
@@ -446,6 +453,14 @@ router.put('/:id/status', authenticate, requireRole(1), async (req, res) => {
       }
     } else if (status === 'paid') {
       bill.paidDate = new Date();
+
+      // Debit wallet (fund tracking) when bill is paid
+      if (!['credited', 'paid'].includes(oldStatus)) {
+        await debitWallet(bill.createdBy, bill.totalAmount, session, true);
+      }
+
+      // Bills are always paid from fund allocation or investment pool
+      // No wallet debit needed
     }
 
     await bill.save({ session });
@@ -454,6 +469,7 @@ router.put('/:id/status', authenticate, requireRole(1), async (req, res) => {
 
     await bill.populate('site', 'name');
     await bill.populate('createdBy', 'name email');
+    await bill.populate('fundAllocation');
     await bill.populate('linkedInvestment');
 
     res.json(bill);
@@ -548,6 +564,38 @@ router.get('/export/csv', authenticate, async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=bills-export-${new Date().toISOString().split('T')[0]}.csv`);
     res.send(csvContent);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Bulk delete bills
+router.post('/bulk-delete', authenticate, requireRole(1), async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'IDs array is required and cannot be empty' });
+    }
+
+    // Verify all bills belong to the user's organization
+    const bills = await Bill.find({
+      _id: { $in: ids },
+      organization: req.user.organization
+    });
+
+    if (bills.length !== ids.length) {
+      return res.status(403).json({ message: 'Some bills do not belong to your organization' });
+    }
+
+    // Delete the bills
+    await Bill.deleteMany({ _id: { $in: ids } });
+
+    res.json({
+      success: true,
+      message: `${ids.length} bill(s) deleted successfully`,
+      deletedCount: ids.length
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

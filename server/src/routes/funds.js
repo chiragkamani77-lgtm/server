@@ -2,14 +2,15 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { FundAllocation, User, Site, Expense, Bill, WorkerLedger, Investment } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { creditWallet, debitWallet, transferWallet } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
-// Utility function to validate fund availability (LEGACY - for backward compatibility)
-// In wallet-based system, this validates wallet balance of the allocation's recipient
+// Utility function to validate fund availability
+// Validates that the fund allocation has enough unspent balance
 async function validateFundAvailability(fundAllocationId, requestedAmount) {
   try {
-    // Get fund allocation to identify the user
+    // Get fund allocation
     const allocation = await FundAllocation.findById(fundAllocationId);
 
     if (!allocation) {
@@ -29,19 +30,56 @@ async function validateFundAvailability(fundAllocationId, requestedAmount) {
       };
     }
 
-    // Use wallet-based validation for the allocation's recipient
-    const walletCheck = await validateWalletBalance(
-      allocation.toUser,
-      requestedAmount,
-      allocation.organization
-    );
+    const allocatedAmount = allocation.amount;
+
+    // Calculate total spent from this fund allocation
+    const expensesAgg = await Expense.aggregate([
+      {
+        $match: {
+          fundAllocation: allocation._id,
+          status: { $in: ['approved', 'paid'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalExpenses: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalExpenses = expensesAgg[0]?.totalExpenses || 0;
+
+    // Calculate total ledger payments from this fund allocation
+    const ledgerAgg = await WorkerLedger.aggregate([
+      {
+        $match: {
+          fundAllocation: allocation._id,
+          type: 'credit'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalLedger: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalLedger = ledgerAgg[0]?.totalLedger || 0;
+
+    const totalSpent = totalExpenses + totalLedger;
+    const balance = allocatedAmount - totalSpent;
+    const available = requestedAmount <= balance;
 
     return {
-      available: walletCheck.available,
-      balance: walletCheck.balance,
-      allocated: walletCheck.totalReceived,
-      utilized: walletCheck.totalSpent,
-      message: walletCheck.message
+      available,
+      balance,
+      allocated: allocatedAmount,
+      utilized: totalSpent,
+      message: available
+        ? 'Sufficient funds in allocation'
+        : `Insufficient funds in allocation. Available: ${balance.toFixed(2)}, Requested: ${requestedAmount.toFixed(2)}`
     };
   } catch (error) {
     return {
@@ -108,130 +146,27 @@ async function validateInvestmentPool(requestedAmount, organization) {
 // Utility function to validate wallet balance
 async function validateWalletBalance(userId, requestedAmount, organization) {
   try {
-    // Convert to ObjectId for consistent comparison
-    // Check if already ObjectId instance to avoid unnecessary conversion
-    const orgId = organization instanceof mongoose.Types.ObjectId
-      ? organization
-      : mongoose.Types.ObjectId.createFromHexString(organization.toString());
+    // Simply read the wallet balance from the user document
+    const user = await User.findById(userId).select('walletBalance');
 
-    const userObjId = userId instanceof mongoose.Types.ObjectId
-      ? userId
-      : mongoose.Types.ObjectId.createFromHexString(userId.toString());
+    if (!user) {
+      return {
+        available: false,
+        balance: 0,
+        totalReceived: 0,
+        totalSpent: 0,
+        message: 'User not found'
+      };
+    }
 
-    // Get total received (wallet credits)
-    const receivedAgg = await FundAllocation.aggregate([
-      {
-        $match: {
-          organization: orgId,
-          toUser: userObjId,
-          status: 'disbursed'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalReceived: { $sum: '$amount' }
-        }
-      }
-    ]);
-
-    const totalReceived = receivedAgg[0]?.totalReceived || 0;
-
-    // Get total expenses
-    const expensesAgg = await Expense.aggregate([
-      {
-        $match: {
-          organization: orgId,
-          user: userObjId
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalExpenses: { $sum: '$amount' }
-        }
-      }
-    ]);
-
-    const totalExpenses = expensesAgg[0]?.totalExpenses || 0;
-
-    // Get total bills
-    const billsAgg = await Bill.aggregate([
-      {
-        $match: {
-          organization: orgId,
-          createdBy: userObjId,
-          status: { $in: ['credited', 'paid'] }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalBills: { $sum: '$totalAmount' }
-        }
-      }
-    ]);
-
-    const totalBills = billsAgg[0]?.totalBills || 0;
-
-    // Get ledger entries
-    const userAllocations = await FundAllocation.find({
-      organization: orgId,
-      toUser: userObjId,
-      status: 'disbursed'
-    }).select('_id');
-
-    const allocationIds = userAllocations.map(a => a._id);
-
-    const ledgerAgg = await WorkerLedger.aggregate([
-      {
-        $match: {
-          organization: orgId,
-          fundAllocation: { $in: allocationIds }
-        }
-      },
-      {
-        $group: {
-          _id: '$type',
-          total: { $sum: '$amount' }
-        }
-      }
-    ]);
-
-    const ledgerCredits = ledgerAgg.find(l => l._id === 'credit')?.total || 0;
-    const ledgerDebits = ledgerAgg.find(l => l._id === 'debit')?.total || 0;
-    const netLedger = ledgerCredits - ledgerDebits;
-
-    // Get sub-allocations (funds passed down to others)
-    // Exclude self-allocations to avoid double-counting
-    const subAllocationsAgg = await FundAllocation.aggregate([
-      {
-        $match: {
-          organization: orgId,
-          fromUser: userObjId,
-          status: 'disbursed',
-          $expr: { $ne: ['$fromUser', '$toUser'] } // Exclude self-allocations
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalSubAllocated: { $sum: '$amount' }
-        }
-      }
-    ]);
-
-    const totalSubAllocated = subAllocationsAgg[0]?.totalSubAllocated || 0;
-
-    const totalSpent = totalExpenses + totalBills + netLedger + totalSubAllocated;
-    const balance = totalReceived - totalSpent;
+    const balance = user.walletBalance || 0;
     const available = requestedAmount <= balance;
 
     return {
       available,
       balance,
-      totalReceived,
-      totalSpent,
+      totalReceived: 0, // Not calculated anymore, kept for backward compatibility
+      totalSpent: 0, // Not calculated anymore, kept for backward compatibility
       message: available
         ? 'Sufficient wallet balance'
         : `Insufficient wallet balance. Available: ${balance.toFixed(2)}, Requested: ${requestedAmount.toFixed(2)}`
@@ -240,6 +175,8 @@ async function validateWalletBalance(userId, requestedAmount, organization) {
     return {
       available: false,
       balance: 0,
+      totalReceived: 0,
+      totalSpent: 0,
       message: `Error validating wallet balance: ${error.message}`
     };
   }
@@ -985,6 +922,9 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
 
 // Update allocation status (approve/reject/disburse)
 router.put('/:id/status', authenticate, requireRole(1, 2, 3), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { status } = req.body;
 
@@ -992,37 +932,64 @@ router.put('/:id/status', authenticate, requireRole(1, 2, 3), async (req, res) =
       return res.status(400).json({ message: 'Invalid status' });
     }
 
-    const allocation = await FundAllocation.findById(req.params.id);
+    const allocation = await FundAllocation.findById(req.params.id).session(session);
 
     if (!allocation) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Allocation not found' });
     }
 
     // Check organization access
     if (allocation.organization.toString() !== req.user.organization?.toString()) {
+      await session.abortTransaction();
       return res.status(403).json({ message: 'Access denied' });
     }
 
     // Level 1 can approve/reject any, Level 2 and 3 can only disburse their received funds
     if (req.user.role === 2 || req.user.role === 3) {
       if (status !== 'disbursed' || allocation.toUser.toString() !== req.user._id.toString()) {
+        await session.abortTransaction();
         return res.status(403).json({ message: 'Can only mark as disbursed for funds you received' });
       }
+    }
+
+    // Check if status is already disbursed to prevent double-crediting
+    if (allocation.status === 'disbursed' && status === 'disbursed') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Allocation already disbursed' });
     }
 
     allocation.status = status;
     if (status === 'disbursed') {
       allocation.disbursedDate = new Date();
+
+      // Update wallet balances
+      const fromUser = await User.findById(allocation.fromUser).session(session);
+
+      // If fromUser is Developer (role 1), funds come from investment pool - only credit receiver
+      // Otherwise, transfer from sender's wallet to receiver's wallet
+      if (fromUser && fromUser.role === 1) {
+        // Credit only receiver (funds from investment pool)
+        await creditWallet(allocation.toUser, allocation.amount, session);
+      } else {
+        // Transfer from sender to receiver
+        await transferWallet(allocation.fromUser, allocation.toUser, allocation.amount, session);
+      }
     }
 
-    await allocation.save();
+    await allocation.save({ session });
+    await session.commitTransaction();
+
     await allocation.populate('fromUser', 'name email role');
     await allocation.populate('toUser', 'name email role');
     if (allocation.site) await allocation.populate('site', 'name');
 
     res.json(allocation);
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 

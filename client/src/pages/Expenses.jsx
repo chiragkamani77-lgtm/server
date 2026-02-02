@@ -9,6 +9,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
+import { useBulkSelect } from '@/hooks/use-bulk-select'
+import { useLoading } from '@/hooks/use-loading'
 import { useExpensePermissions } from '@/hooks/useExpensePermissions'
 import {
   ExpenseTable,
@@ -16,7 +18,7 @@ import {
   ExpenseFilters,
 } from '@/components/expenses'
 import { formatCurrency } from '@/lib/utils'
-import { Plus, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
 
 export default function Expenses() {
   const permissions = useExpensePermissions()
@@ -34,6 +36,24 @@ export default function Expenses() {
     startDate: '',
     endDate: '',
   })
+
+  // Use custom hooks
+  const loadingStates = useLoading()
+  const bulkSelect = useBulkSelect(
+    expenses,
+    expensesApi.bulkDelete,
+    (count) => {
+      toast({ title: `${count} expense(s) deleted successfully` })
+      loadExpenses()
+    },
+    (error) => {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete expenses',
+        variant: 'destructive',
+      })
+    }
+  )
 
   useEffect(() => {
     loadExpenses()
@@ -104,19 +124,32 @@ export default function Expenses() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-3 md:p-6 space-y-4 md:space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Expenses</h1>
-          <p className="text-muted-foreground">Manage and track all expenses</p>
+          <h1 className="text-xl md:text-3xl font-bold tracking-tight">Expenses</h1>
+          <p className="text-xs md:text-base text-muted-foreground">Manage and track all expenses</p>
         </div>
-        {permissions.canCreate && (
-          <Button onClick={() => setIsAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Expense
-          </Button>
-        )}
+        <div className="flex flex-col sm:flex-row gap-2">
+          {bulkSelect.selectedCount > 0 && (
+            <Button
+              variant="destructive"
+              onClick={bulkSelect.deleteSelected}
+              disabled={bulkSelect.deleting}
+              className="w-full sm:w-auto"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {bulkSelect.deleting ? 'Deleting...' : `Delete ${bulkSelect.selectedCount}`}
+            </Button>
+          )}
+          {permissions.canCreate && (
+            <Button onClick={() => setIsAddOpen(true)} disabled={loadingStates.creating} className="w-full sm:w-auto">
+              <Plus className="mr-2 h-4 w-4" />
+              {loadingStates.creating ? 'Adding...' : 'Add Expense'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -165,6 +198,7 @@ export default function Expenses() {
             loading={loading}
             onRefresh={loadExpenses}
             showSiteColumn={true}
+            bulkSelect={bulkSelect}
           />
 
           {/* Pagination */}

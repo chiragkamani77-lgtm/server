@@ -75,6 +75,7 @@ export const expensesApi = {
   create: (data) => api.post('/expenses', data),
   update: (id, data) => api.put(`/expenses/${id}`, data),
   delete: (id) => api.delete(`/expenses/${id}`),
+  bulkDelete: (ids) => api.post('/expenses/bulk-delete', { ids }),
   getSummary: (siteId) => api.get(`/expenses/summary/${siteId}`),
   approve: (id, data) => api.put(`/expenses/${id}/approve`, data),
   uploadReceipt: (id, file) => {
@@ -138,7 +139,8 @@ export const investmentsApi = {
   create: (data) => api.post('/investments', data),
   update: (id, data) => api.put(`/investments/${id}`, data),
   delete: (id) => api.delete(`/investments/${id}`),
-  getSummary: () => api.get('/investments/summary')
+  getSummary: () => api.get('/investments/summary'),
+  withdraw: (data) => api.post('/investments/withdraw', data)
 }
 
 // Fund Allocations API
@@ -165,6 +167,7 @@ export const billsApi = {
   approve: (id, data) => api.put(`/bills/${id}/approve`, data),
   updateStatus: (id, status) => api.put(`/bills/${id}/status`, { status }),
   delete: (id) => api.delete(`/bills/${id}`),
+  bulkDelete: (ids) => api.post('/bills/bulk-delete', { ids }),
   getSummary: () => api.get('/bills/summary'),
   uploadReceipt: (id, file) => {
     const formData = new FormData()
@@ -187,7 +190,13 @@ export const attendanceApi = {
   bulkCreate: (data) => api.post('/attendance/bulk', data),
   update: (id, data) => api.put(`/attendance/${id}`, data),
   delete: (id) => api.delete(`/attendance/${id}`),
-  getSummary: (workerId, params) => api.get(`/attendance/summary/${workerId}`, { params })
+  bulkDelete: (ids) => api.post('/attendance/bulk-delete', { ids }),
+  getSummary: (workerId, params) => api.get(`/attendance/summary/${workerId}`, { params }),
+  exportTemplate: (params) => api.get('/attendance/export-template', {
+    params,
+    responseType: 'blob'
+  }),
+  importSheet: (data) => api.post('/attendance/import-sheet', data)
 }
 
 // Worker Ledger API
@@ -197,6 +206,7 @@ export const ledgerApi = {
   create: (data) => api.post('/ledger', data),
   update: (id, data) => api.put(`/ledger/${id}`, data),
   delete: (id) => api.delete(`/ledger/${id}`),
+  bulkDelete: (ids) => api.post('/ledger/bulk-delete', { ids }),
   getBalance: (workerId) => api.get(`/ledger/balance/${workerId}`),
   getPendingSalary: (workerId) => api.get(`/ledger/pending-salary/${workerId}`),
   paySalary: (data) => api.post('/ledger/pay-salary', data),

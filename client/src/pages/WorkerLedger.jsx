@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
   TableBody,
@@ -31,6 +32,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
+import { useBulkSelect } from '@/hooks/use-bulk-select'
+import { useLoading } from '@/hooks/use-loading'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Wallet, TrendingUp, TrendingDown, Filter, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownLeft, Edit, Trash2 } from 'lucide-react'
 import { FundAllocationSelector } from '@/components/FundAllocationSelector'
@@ -89,6 +92,24 @@ export default function WorkerLedger() {
     startDate: '',
     endDate: '',
   })
+
+  // Use custom hooks
+  const loadingStates = useLoading()
+  const bulkSelect = useBulkSelect(
+    entries,
+    ledgerApi.bulkDelete,
+    (count) => {
+      toast({ title: `${count} ledger entry(ies) deleted successfully` })
+      fetchData()
+    },
+    (error) => {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete entries',
+        variant: 'destructive',
+      })
+    }
+  )
 
   const [form, setForm] = useState({
     workerId: '',
@@ -467,7 +488,8 @@ export default function WorkerLedger() {
       count: selected.length,
       totalPending: selected.reduce((sum, w) => sum + w.totalPending, 0),
       totalAdvances: selected.reduce((sum, w) => sum + w.totalAdvances, 0),
-      totalNetPayable: selected.reduce((sum, w) => sum + w.netPayable, 0),
+      // Only count positive amounts (workers who should receive payment, not those who owe)
+      totalNetPayable: selected.reduce((sum, w) => sum + Math.max(w.netPayable, 0), 0),
     }
   }
 
@@ -486,13 +508,24 @@ export default function WorkerLedger() {
         </div>
         {(isAdmin || isSupervisor) && (
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            {bulkSelect.selectedCount > 0 && (
+              <Button
+                variant="destructive"
+                onClick={bulkSelect.deleteSelected}
+                disabled={bulkSelect.deleting}
+                className="w-full sm:w-auto"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {bulkSelect.deleting ? 'Deleting...' : `Delete ${bulkSelect.selectedCount}`}
+              </Button>
+            )}
             <Button variant="outline" onClick={openBulkPayDialog} className="w-full sm:w-auto">
               <Wallet className="h-4 w-4 mr-2" />
               Bulk Pay Salary
             </Button>
-            <Button onClick={() => setIsAddOpen(true)} className="w-full sm:w-auto">
+            <Button onClick={() => setIsAddOpen(true)} disabled={loadingStates.creating} className="w-full sm:w-auto">
               <Plus className="h-4 w-4 mr-2" />
-              Add Entry
+              {loadingStates.creating ? 'Adding...' : 'Add Entry'}
             </Button>
           </div>
         )}
@@ -724,6 +757,13 @@ export default function WorkerLedger() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={bulkSelect.isAllSelected()}
+                  onCheckedChange={bulkSelect.toggleSelectAll}
+                  aria-label="Select all"
+                />
+              </TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Worker</TableHead>
               <TableHead>Type</TableHead>
@@ -738,7 +778,7 @@ export default function WorkerLedger() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={isAdmin ? 9 : 8} className="text-center py-8">
+                <TableCell colSpan={isAdmin ? 10 : 9} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -746,13 +786,20 @@ export default function WorkerLedger() {
               </TableRow>
             ) : entries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isAdmin ? 9 : 8} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={isAdmin ? 10 : 9} className="text-center text-muted-foreground py-8">
                   No ledger entries found
                 </TableCell>
               </TableRow>
             ) : (
               entries.map((entry) => (
                 <TableRow key={entry._id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={bulkSelect.isSelected(entry._id)}
+                      onCheckedChange={() => bulkSelect.toggleSelect(entry._id)}
+                      aria-label={`Select ${entry.worker?.name}`}
+                    />
+                  </TableCell>
                   <TableCell>{formatDate(entry.transactionDate)}</TableCell>
                   <TableCell className="font-medium">{entry.worker?.name}</TableCell>
                   <TableCell>
@@ -1215,9 +1262,19 @@ export default function WorkerLedger() {
                     </div>
                     <div>
                       <p className="text-muted-foreground">Amount to Pay</p>
-                      <p className="font-bold text-lg text-green-700">{formatCurrency(getSelectedTotals().totalNetPayable)}</p>
+                      <p className={`font-bold text-lg ${getSelectedTotals().totalNetPayable >= 0 ? 'text-green-700' : 'text-gray-500'}`}>
+                        {formatCurrency(Math.max(getSelectedTotals().totalNetPayable, 0))}
+                      </p>
                     </div>
                   </div>
+                  {selectedWorkers.some(wId => {
+                    const worker = bulkPendingWorkers.find(w => w.worker._id === wId);
+                    return worker && worker.netPayable < 0;
+                  }) && (
+                    <p className="text-xs text-yellow-700 mt-2 bg-yellow-50 p-2 rounded border border-yellow-200">
+                      <strong>Note:</strong> Workers with red background owe money (advances exceed pending salary). They will not receive payment but their advances will be marked as deducted.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1245,7 +1302,9 @@ export default function WorkerLedger() {
                       {bulkPendingWorkers.map((item) => (
                         <div
                           key={item.worker._id}
-                          className="p-3 hover:bg-muted/50 cursor-pointer flex items-center gap-3"
+                          className={`p-3 cursor-pointer flex items-center gap-3 ${
+                            item.netPayable >= 0 ? 'hover:bg-muted/50' : 'bg-red-50 hover:bg-red-100/50'
+                          }`}
                           onClick={() => toggleWorkerSelection(item.worker._id)}
                         >
                           <input
@@ -1264,7 +1323,11 @@ export default function WorkerLedger() {
                                 </p>
                               </div>
                               <div className="text-right">
-                                <p className="font-bold text-green-600">{formatCurrency(item.netPayable)}</p>
+                                {item.netPayable >= 0 ? (
+                                  <p className="font-bold text-green-600">{formatCurrency(item.netPayable)}</p>
+                                ) : (
+                                  <p className="font-bold text-red-600">Owes: {formatCurrency(Math.abs(item.netPayable))}</p>
+                                )}
                                 <p className="text-xs text-muted-foreground">
                                   Pending: {formatCurrency(item.totalPending)}
                                   {item.totalAdvances > 0 && ` | Adv: ${formatCurrency(item.totalAdvances)}`}

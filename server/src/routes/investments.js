@@ -1,6 +1,8 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { Investment, User, Expense, Site, Bill, WorkerLedger, FundAllocation } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { creditWallet, getWalletBalance } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
@@ -182,9 +184,9 @@ router.get('/summary', authenticate, async (req, res) => {
 
     const totalFundsDisbursed = fundAllocationsAgg.reduce((sum, f) => sum + f.total, 0);
 
-    // Calculate total utilized funds
+    // Calculate total utilized funds (including fund allocations)
     const totalBills = billsAgg[0]?.totalBills || 0;
-    const totalUtilized = totalExpenses + totalBills + netWorkerPayable;
+    const totalUtilized = totalExpenses + totalBills + netWorkerPayable + totalFundsDisbursed;
 
     res.json({
       partnerInvestments,
@@ -227,6 +229,7 @@ router.get('/summary', authenticate, async (req, res) => {
         siteExpenses: totalExpenses,
         materialBills: totalBills,
         laborCosts: netWorkerPayable,
+        fundsAllocated: totalFundsDisbursed,
         remainingFunds: totalInvestment - totalUtilized
       },
 
@@ -346,6 +349,164 @@ router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
     res.json({ message: 'Investment deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Withdraw from available investment pool (Level 1 only)
+router.post('/withdraw', authenticate, requireRole(1), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (!req.user.organization) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'No organization assigned' });
+    }
+
+    const { partnerId, amount, description, referenceNumber, paymentMode } = req.body;
+
+    if (!partnerId) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Partner is required for withdrawal' });
+    }
+
+    if (!amount || amount <= 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Valid withdrawal amount is required' });
+    }
+
+    // Verify partner belongs to same organization
+    const partner = await User.findById(partnerId).session(session);
+    if (!partner) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Partner not found' });
+    }
+
+    if (partner.organization?.toString() !== req.user.organization.toString()) {
+      await session.abortTransaction();
+      return res.status(403).json({ message: 'Partner not in your organization' });
+    }
+
+    // Calculate available funds (same logic as summary endpoint)
+    const totalInvestmentResult = await Investment.aggregate([
+      { $match: { organization: req.user.organization } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]).session(session);
+
+    const totalInvestment = totalInvestmentResult[0]?.total || 0;
+
+    // Calculate total expenses
+    let expenseAgg = await Expense.aggregate([
+      { $match: { organization: req.user.organization } },
+      { $group: { _id: null, totalExpenses: { $sum: '$amount' } } }
+    ]).session(session);
+
+    if (!expenseAgg[0]) {
+      const sites = await Site.find({ organization: req.user.organization }).select('_id').session(session);
+      const siteIds = sites.map(s => s._id);
+      expenseAgg = await Expense.aggregate([
+        { $match: { site: { $in: siteIds } } },
+        { $group: { _id: null, totalExpenses: { $sum: '$amount' } } }
+      ]).session(session);
+    }
+
+    const totalExpenses = expenseAgg[0]?.totalExpenses || 0;
+
+    // Total Bills
+    const billsAgg = await Bill.aggregate([
+      { $match: { organization: req.user.organization, status: { $in: ['credited', 'paid'] } } },
+      { $group: { _id: null, totalBills: { $sum: '$totalAmount' } } }
+    ]).session(session);
+
+    const totalBills = billsAgg[0]?.totalBills || 0;
+
+    // Total Worker Ledger
+    const workerLedgerAgg = await WorkerLedger.aggregate([
+      { $match: { organization: req.user.organization } },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' }
+        }
+      }
+    ]).session(session);
+
+    const workerCredits = workerLedgerAgg.find(w => w._id === 'credit')?.total || 0;
+    const workerDebits = workerLedgerAgg.find(w => w._id === 'debit')?.total || 0;
+    const netWorkerPayable = workerCredits - workerDebits;
+
+    // Total Fund Allocations (disbursed funds)
+    const fundAllocationsAgg = await FundAllocation.aggregate([
+      { $match: { organization: req.user.organization, status: 'disbursed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]).session(session);
+
+    const totalFundsDisbursed = fundAllocationsAgg[0]?.total || 0;
+
+    const totalUtilized = totalExpenses + totalBills + netWorkerPayable + totalFundsDisbursed;
+    const availableFunds = totalInvestment - totalUtilized;
+
+    // Validate withdrawal amount
+    if (amount > availableFunds) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        message: `Insufficient available funds. Available: ${availableFunds.toFixed(2)}, Requested: ${amount.toFixed(2)}`
+      });
+    }
+
+    // Create a negative investment record to track withdrawal
+    const withdrawal = new Investment({
+      organization: req.user.organization,
+      partner: partnerId, // Partner withdrawing
+      amount: -amount, // Negative amount
+      description: description || 'Withdrawal from investment pool',
+      investmentDate: new Date(),
+      referenceNumber,
+      paymentMode: paymentMode || 'bank_transfer',
+      sourceType: 'other',
+      autoGenerated: true
+    });
+
+    await withdrawal.save({ session });
+
+    // Credit partner's wallet
+    await creditWallet(partnerId, amount, session);
+
+    // Create ledger entry for tracking
+    const ledgerEntry = new WorkerLedger({
+      organization: req.user.organization,
+      worker: partnerId,
+      createdBy: req.user._id,
+      type: 'credit',
+      amount: amount,
+      category: 'other',
+      description: description || 'Withdrawal from investment pool',
+      transactionDate: new Date(),
+      referenceNumber,
+      paymentMode: paymentMode || 'bank_transfer',
+      status: 'paid'
+    });
+
+    await ledgerEntry.save({ session });
+
+    await session.commitTransaction();
+
+    await withdrawal.populate('partner', 'name email');
+
+    // Get updated wallet balance
+    const newBalance = await getWalletBalance(partnerId);
+
+    res.json({
+      withdrawal,
+      newWalletBalance: newBalance,
+      availableFunds: availableFunds - amount,
+      message: 'Withdrawal successful'
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 

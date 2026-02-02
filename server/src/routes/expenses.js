@@ -1,8 +1,10 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { Expense, Site, FundAllocation } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import { validateFundAvailability } from './funds.js';
+import { debitWallet } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
@@ -198,45 +200,55 @@ router.get('/summary/:siteId', authenticate, async (req, res) => {
 
 // Create expense
 router.post('/', authenticate, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { siteId, categoryId, amount, description, vendorName, expenseDate, fundAllocationId } = req.body;
 
     if (!req.user.organization) {
+      await session.abortTransaction();
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
     // Fund allocation is now required
     if (!fundAllocationId) {
+      await session.abortTransaction();
       return res.status(400).json({
         message: 'Fund allocation is required for all expenses. Please select a fund allocation.'
       });
     }
 
     // Check site access
-    const site = await Site.findById(siteId);
+    const site = await Site.findById(siteId).session(session);
     if (!site) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Site not found' });
     }
 
     if (req.user.role !== 1 && !site.hasAccess(req.user._id)) {
+      await session.abortTransaction();
       return res.status(403).json({ message: 'Access denied to this site' });
     }
 
     // Validate fund allocation exists and is disbursed
-    const fundAllocation = await FundAllocation.findById(fundAllocationId);
+    const fundAllocation = await FundAllocation.findById(fundAllocationId).session(session);
     if (!fundAllocation) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Fund allocation not found' });
     }
 
     if (fundAllocation.status !== 'disbursed') {
+      await session.abortTransaction();
       return res.status(400).json({
         message: `Fund allocation must be disbursed before use (current status: ${fundAllocation.status})`
       });
     }
 
-    // Validate sufficient funds available
+    // Validate sufficient funds available (using wallet balance)
     const fundCheck = await validateFundAvailability(fundAllocationId, amount);
     if (!fundCheck.available) {
+      await session.abortTransaction();
       return res.status(400).json({
         message: fundCheck.message,
         available: fundCheck.balance,
@@ -265,7 +277,15 @@ router.post('/', authenticate, async (req, res) => {
       expenseDate: expenseDate || new Date()
     });
 
-    await expense.save();
+    await expense.save({ session });
+
+    // Debit wallet for tracking (validated against fund allocation above)
+    if (isDeveloper && amount > 0) {
+      await debitWallet(req.user._id, amount, session, true); // allowNegative=true
+    }
+
+    await session.commitTransaction();
+
     await expense.populate('site', 'name');
     await expense.populate('category', 'name');
     await expense.populate('user', 'name email');
@@ -273,7 +293,10 @@ router.post('/', authenticate, async (req, res) => {
 
     res.status(201).json(expense);
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -372,34 +395,47 @@ router.put('/:id', authenticate, async (req, res) => {
 
 // Approve/Pay expense (Developer only)
 router.put('/:id/approve', authenticate, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     // Only developers can approve
     if (req.user.role !== 1) {
+      await session.abortTransaction();
       return res.status(403).json({ message: 'Only developers can approve expenses' });
     }
 
-    const expense = await Expense.findById(req.params.id);
+    const expense = await Expense.findById(req.params.id).session(session);
 
     if (!expense) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Expense not found' });
     }
 
     const { status, approvedAmount, approvalNotes, paymentMethod, paymentReference } = req.body;
 
     if (!['approved', 'paid', 'rejected'].includes(status)) {
+      await session.abortTransaction();
       return res.status(400).json({ message: 'Invalid status' });
     }
 
+    const previousStatus = expense.status;
     expense.status = status;
 
     if (status === 'approved' || status === 'paid') {
       if (approvedAmount === undefined || approvedAmount === null) {
+        await session.abortTransaction();
         return res.status(400).json({ message: 'Approved amount is required' });
       }
       expense.approvedAmount = approvedAmount;
       expense.amount = approvedAmount; // Set actual amount
       expense.approvedBy = req.user._id;
       expense.approvalDate = new Date();
+
+      // Debit wallet for tracking only if status is changing from pending to approved/paid
+      if (previousStatus === 'pending' && approvedAmount > 0) {
+        await debitWallet(expense.user, approvedAmount, session, true); // allowNegative=true
+      }
     }
 
     if (status === 'paid') {
@@ -410,7 +446,9 @@ router.put('/:id/approve', authenticate, async (req, res) => {
 
     if (approvalNotes !== undefined) expense.approvalNotes = approvalNotes;
 
-    await expense.save();
+    await expense.save({ session });
+    await session.commitTransaction();
+
     await expense.populate('site', 'name');
     await expense.populate('category', 'name');
     await expense.populate('user', 'name email');
@@ -418,7 +456,10 @@ router.put('/:id/approve', authenticate, async (req, res) => {
 
     res.json(expense);
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -476,6 +517,50 @@ router.post('/:id/receipt', authenticate, upload.single('receipt'), async (req, 
     await expense.save();
 
     res.json(expense);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Bulk delete expenses
+router.post('/bulk-delete', authenticate, async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'IDs array is required and cannot be empty' });
+    }
+
+    const isDeveloper = req.user.role === 1;
+
+    // Verify all expenses belong to the user's organization and check permissions
+    const expenses = await Expense.find({ _id: { $in: ids }, organization: req.user.organization });
+
+    if (expenses.length !== ids.length) {
+      return res.status(403).json({ message: 'Some expenses do not belong to your organization' });
+    }
+
+    // For non-developers, verify they own all expenses and they're all pending
+    if (!isDeveloper) {
+      const invalidExpenses = expenses.filter(
+        exp => exp.user.toString() !== req.user._id.toString() || exp.status !== 'pending'
+      );
+
+      if (invalidExpenses.length > 0) {
+        return res.status(403).json({
+          message: 'You can only delete your own pending expenses'
+        });
+      }
+    }
+
+    // Delete the expenses
+    await Expense.deleteMany({ _id: { $in: ids } });
+
+    res.json({
+      success: true,
+      message: `${ids.length} expense(s) deleted successfully`,
+      deletedCount: ids.length
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

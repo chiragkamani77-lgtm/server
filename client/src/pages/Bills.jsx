@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
   TableBody,
@@ -31,9 +32,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
+import { useBulkSelect } from '@/hooks/use-bulk-select'
+import { useLoading } from '@/hooks/use-loading'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Receipt, FileText, CreditCard, ChevronLeft, ChevronRight, Trash2, Edit, Check, Filter, Download, Upload, Eye, X, TrendingUp } from 'lucide-react'
-import { InvestmentSelector } from '@/components/InvestmentSelector'
+import { FundAllocationSelector } from '@/components/FundAllocationSelector'
 
 const BILL_TYPES = [
   { value: 'material', label: 'Material' },
@@ -91,9 +94,27 @@ export default function Bills() {
     billType: '',
   })
 
+  // Use custom hooks
+  const loadingStates = useLoading()
+  const bulkSelect = useBulkSelect(
+    bills,
+    billsApi.bulkDelete,
+    (count) => {
+      toast({ title: `${count} bill(s) deleted successfully` })
+      fetchData()
+    },
+    (error) => {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to delete bills',
+        variant: 'destructive',
+      })
+    }
+  )
+
   const [form, setForm] = useState({
     siteId: '',
-    linkedInvestment: '',
+    fundAllocationId: '',
     vendorName: '',
     vendorGstNumber: '',
     invoiceNumber: '',
@@ -157,10 +178,10 @@ export default function Bills() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    try {
+    await loadingStates.withCreating(async () => {
       const billData = {
         siteId: form.siteId || null,
-        linkedInvestment: form.linkedInvestment || null,
+        fundAllocationId: form.fundAllocationId || null,
         vendorName: form.vendorName,
         vendorGstNumber: form.vendorGstNumber,
         invoiceNumber: form.invoiceNumber,
@@ -174,23 +195,25 @@ export default function Bills() {
         paymentReference: form.paymentReference || null,
       }
 
-      if (editingId) {
-        await billsApi.update(editingId, billData)
-        toast({ title: 'Bill updated successfully' })
-      } else {
-        await billsApi.create(billData)
-        toast({ title: 'Bill added successfully' })
+      try {
+        if (editingId) {
+          await billsApi.update(editingId, billData)
+          toast({ title: 'Bill updated successfully' })
+        } else {
+          await billsApi.create(billData)
+          toast({ title: 'Bill added successfully' })
+        }
+        setIsAddOpen(false)
+        resetForm()
+        fetchData()
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: error.response?.data?.message || 'Failed to save bill',
+          variant: 'destructive',
+        })
       }
-      setIsAddOpen(false)
-      resetForm()
-      fetchData()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to save bill',
-        variant: 'destructive',
-      })
-    }
+    })
   }
 
   const handleStatusUpdate = async (id, status) => {
@@ -211,7 +234,7 @@ export default function Bills() {
     const totalAmount = bill.totalAmount || (parseFloat(bill.baseAmount) + parseFloat(bill.gstAmount))
     setForm({
       siteId: bill.site?._id || '',
-      linkedInvestment: bill.linkedInvestment?._id || '',
+      fundAllocationId: bill.fundAllocation?._id || '',
       vendorName: bill.vendorName,
       vendorGstNumber: bill.vendorGstNumber || '',
       invoiceNumber: bill.invoiceNumber || '',
@@ -247,7 +270,7 @@ export default function Bills() {
   const resetForm = () => {
     setForm({
       siteId: '',
-      linkedInvestment: '',
+      fundAllocationId: '',
       vendorName: '',
       vendorGstNumber: '',
       invoiceNumber: '',
@@ -344,66 +367,77 @@ export default function Bills() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-4 md:space-y-6 p-3 md:p-6">
+      <div className="flex justify-between items-center gap-3 md:gap-4">
         <div>
-          <h1 className="text-3xl font-bold">GST / Government Bills</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl md:text-3xl font-bold">GST / Government Bills</h1>
+          <p className="text-muted-foreground text-xs md:text-base">
             Track and manage all bills with GST details
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {bulkSelect.selectedCount > 0 && (
+            <Button
+              variant="destructive"
+              onClick={bulkSelect.deleteSelected}
+              disabled={bulkSelect.deleting}
+              className="w-full sm:w-auto"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {bulkSelect.deleting ? 'Deleting...' : `Delete ${bulkSelect.selectedCount}`}
+            </Button>
+          )}
           <Button variant="outline" onClick={handleExport} disabled={exporting} className="w-full sm:w-auto">
             <Download className="h-4 w-4 mr-2" />
             {exporting ? 'Exporting...' : 'Export CSV'}
           </Button>
-          <Button onClick={() => { resetForm(); setIsAddOpen(true); }} className="w-full sm:w-auto">
+          <Button onClick={() => { resetForm(); setIsAddOpen(true); }} disabled={loadingStates.creating} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
-            Add Bill
+            {loadingStates.creating ? 'Adding...' : 'Add Bill'}
           </Button>
         </div>
       </div>
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Bills</CardTitle>
-              <Receipt className="h-4 w-4 text-muted-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+              <CardTitle className="text-xs md:text-sm font-medium">Total Bills</CardTitle>
+              <Receipt className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(summary.totals.totalAmount)}</div>
-              <p className="text-xs text-muted-foreground">{summary.totals.count} bills</p>
+            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+              <div className="text-lg md:text-2xl font-bold">{formatCurrency(summary.totals.totalAmount)}</div>
+              <p className="text-[10px] md:text-xs text-muted-foreground">{summary.totals.count} bills</p>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total GST</CardTitle>
-              <FileText className="h-4 w-4 text-muted-foreground" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+              <CardTitle className="text-xs md:text-sm font-medium">Total GST</CardTitle>
+              <FileText className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(summary.totals.totalGstAmount)}</div>
+            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+              <div className="text-lg md:text-2xl font-bold">{formatCurrency(summary.totals.totalGstAmount)}</div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Pending</CardTitle>
-              <CreditCard className="h-4 w-4 text-yellow-500" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+              <CardTitle className="text-xs md:text-sm font-medium">Pending</CardTitle>
+              <CreditCard className="h-3 w-3 md:h-4 md:w-4 text-yellow-500" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-yellow-600">
+            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+              <div className="text-lg md:text-2xl font-bold text-yellow-600">
                 {formatCurrency(summary.statusSummary.find(s => s._id === 'pending')?.totalAmount || 0)}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Credited</CardTitle>
-              <Check className="h-4 w-4 text-green-500" />
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
+              <CardTitle className="text-xs md:text-sm font-medium">Credited</CardTitle>
+              <Check className="h-3 w-3 md:h-4 md:w-4 text-green-500" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">
+            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
+              <div className="text-lg md:text-2xl font-bold text-green-600">
                 {formatCurrency(summary.statusSummary.find(s => s._id === 'credited')?.totalAmount || 0)}
               </div>
             </CardContent>
@@ -413,16 +447,16 @@ export default function Bills() {
 
       {/* Filters */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Filter className="h-4 w-4" />
+        <CardHeader className="pb-3 p-3 md:p-6">
+          <CardTitle className="text-sm md:text-base flex items-center gap-2">
+            <Filter className="h-3 w-3 md:h-4 md:w-4" />
             Filters
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-4">
+        <CardContent className="p-3 md:p-6">
+          <div className="grid gap-3 md:gap-4 grid-cols-2 md:grid-cols-4">
             <div className="space-y-2">
-              <Label>Site</Label>
+              <Label className="text-xs md:text-sm">Site</Label>
               <Select
                 value={filters.siteId}
                 onValueChange={(value) => {
@@ -442,7 +476,7 @@ export default function Bills() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Status</Label>
+              <Label className="text-xs md:text-sm">Status</Label>
               <Select
                 value={filters.status}
                 onValueChange={(value) => {
@@ -463,7 +497,7 @@ export default function Bills() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Type</Label>
+              <Label className="text-xs md:text-sm">Type</Label>
               <Select
                 value={filters.billType}
                 onValueChange={(value) => {
@@ -482,9 +516,9 @@ export default function Bills() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>&nbsp;</Label>
-              <Button variant="outline" className="w-full" onClick={clearFilters}>
+            <div className="space-y-2 col-span-2 md:col-span-1">
+              <Label className="hidden md:block">&nbsp;</Label>
+              <Button variant="outline" className="w-full text-xs md:text-sm" onClick={clearFilters}>
                 Clear Filters
               </Button>
             </div>
@@ -502,6 +536,13 @@ export default function Bills() {
           <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12">
+                <Checkbox
+                  checked={bulkSelect.isAllSelected()}
+                  onCheckedChange={bulkSelect.toggleSelectAll}
+                  aria-label="Select all"
+                />
+              </TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead className="hidden md:table-cell">Invoice</TableHead>
@@ -518,7 +559,7 @@ export default function Bills() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8">
+                <TableCell colSpan={12} className="text-center py-8">
                   <div className="flex justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
                   </div>
@@ -526,13 +567,20 @@ export default function Bills() {
               </TableRow>
             ) : bills.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
                   No bills found
                 </TableCell>
               </TableRow>
             ) : (
               bills.map((bill) => (
                 <TableRow key={bill._id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={bulkSelect.isSelected(bill._id)}
+                      onCheckedChange={() => bulkSelect.toggleSelect(bill._id)}
+                      aria-label={`Select ${bill.vendorName}`}
+                    />
+                  </TableCell>
                   <TableCell className="whitespace-nowrap">{formatDate(bill.billDate)}</TableCell>
                   <TableCell className="min-w-[150px]">
                     <div>
@@ -604,13 +652,23 @@ export default function Bills() {
                         <Eye className="h-4 w-4" />
                       </Button>
                       {isAdmin && bill.status === 'pending' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleStatusUpdate(bill._id, 'credited')}
-                        >
-                          Credit
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleStatusUpdate(bill._id, 'credited')}
+                          >
+                            Credit
+                          </Button>
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleStatusUpdate(bill._id, 'paid')}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            Mark Paid
+                          </Button>
+                        </>
                       )}
                       {isAdmin && bill.status === 'credited' && (
                         <Button
@@ -764,12 +822,12 @@ export default function Bills() {
                   </Select>
                 </div>
               </div>
-              <InvestmentSelector
-                value={form.linkedInvestment}
-                onChange={(value) => setForm({ ...form, linkedInvestment: value })}
+              <FundAllocationSelector
+                value={form.fundAllocationId}
+                onChange={(value) => setForm({ ...form, fundAllocationId: value })}
                 requestedAmount={parseFloat(form.totalAmount || 0)}
-                required={true}
-                label="Investment"
+                required={false}
+                label="Fund Allocation (Optional)"
               />
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
