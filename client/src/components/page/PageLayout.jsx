@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
  */
 export function PageLayout({ children, className }) {
   return (
-    <div className={cn('flex flex-col min-h-full bg-gray-50 -m-6', className)}>
+    <div className={cn('flex flex-col bg-gray-50 -m-6', className)}>
       {children}
     </div>
   )

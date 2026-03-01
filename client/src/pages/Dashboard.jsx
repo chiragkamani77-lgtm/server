@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { sitesApi, reportsApi } from '@/lib/api'
 import { formatCurrency, STATUS_COLORS } from '@/lib/utils'
@@ -17,6 +18,7 @@ const SITE_AVATAR_COLORS = { active: 'teal', completed: 'slate', on_hold: 'amber
 
 export default function Dashboard() {
   const { user, isAdmin, hasOrganization } = useAuth()
+  const navigate = useNavigate()
   const [sites, setSites] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -153,6 +155,7 @@ export default function Dashboard() {
                   label: site.status === 'on_hold' ? 'On Hold' : site.status.charAt(0).toUpperCase() + site.status.slice(1),
                   className: STATUS_COLORS[site.status] || '',
                 }}
+                onClick={() => navigate(`/sites/${site._id}`)}
               />
             ))}
           </div>

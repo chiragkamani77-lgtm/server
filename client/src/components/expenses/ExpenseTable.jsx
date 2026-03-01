@@ -295,7 +295,7 @@ export function ExpenseTable({
                       </Button>
                     )}
 
-                    {/* Approve (Admin only) */}
+                    {/* Approve */}
                     {permissions.canApprove && expense.status === 'pending' && (
                       <Button
                         size="sm"
@@ -307,7 +307,7 @@ export function ExpenseTable({
                       </Button>
                     )}
 
-                    {/* Reject (Admin only) */}
+                    {/* Reject */}
                     {permissions.canApprove && expense.status === 'pending' && (
                       <Button
                         size="sm"
@@ -319,7 +319,7 @@ export function ExpenseTable({
                       </Button>
                     )}
 
-                    {/* Mark as Paid (Admin only) */}
+                    {/* Mark as Paid */}
                     {permissions.canMarkPaid && expense.status === 'approved' && (
                       <Button
                         size="sm"

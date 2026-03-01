@@ -361,26 +361,9 @@ export default function Investments() {
       <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
         <SheetContent title={editingId ? 'Edit Investment' : 'Add Investment'}>
           <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
-            {!editingId && (
-              <div className="space-y-1">
-                <Label>Partner *</Label>
-                <Select
-                  value={form.partnerId}
-                  onValueChange={(v) => setForm({ ...form, partnerId: v })}
-                  required
-                >
-                  <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
-                  <SelectContent>
-                    {partners.map((p) => (
-                      <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
+            {/* Amount first */}
             <div className="space-y-1">
-              <Label>Amount (₹) *</Label>
+              <Label>Amount ₹ *</Label>
               <Input
                 type="number"
                 value={form.amount}
@@ -388,51 +371,75 @@ export default function Investments() {
                 placeholder="e.g. 100000"
                 required
                 min="0"
+                autoFocus
               />
             </div>
 
-            <div className="space-y-1">
-              <Label>Date *</Label>
-              <Input
-                type="date"
-                value={form.investmentDate}
-                onChange={(e) => setForm({ ...form, investmentDate: e.target.value })}
-                required
-              />
-            </div>
+            {/* Rest shown after amount is entered */}
+            {parseFloat(form.amount) > 0 && (
+              <>
+                {!editingId && (
+                  <div className="space-y-1">
+                    <Label>Partner *</Label>
+                    <Select
+                      value={form.partnerId}
+                      onValueChange={(v) => setForm({ ...form, partnerId: v })}
+                      required
+                    >
+                      <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
+                      <SelectContent>
+                        {partners.map((p) => (
+                          <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
-            <div className="space-y-1">
-              <Label>Payment Mode</Label>
-              <Select value={form.paymentMode} onValueChange={(v) => setForm({ ...form, paymentMode: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PAYMENT_MODES.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                <div className="space-y-1">
+                  <Label>Date *</Label>
+                  <Input
+                    type="date"
+                    value={form.investmentDate}
+                    onChange={(e) => setForm({ ...form, investmentDate: e.target.value })}
+                    required
+                  />
+                </div>
 
-            <div className="space-y-1">
-              <Label>Reference Number</Label>
-              <Input
-                value={form.referenceNumber}
-                onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
-                placeholder="e.g. TXN123456"
-              />
-            </div>
+                <div className="space-y-1">
+                  <Label>Payment Mode</Label>
+                  <Select value={form.paymentMode} onValueChange={(v) => setForm({ ...form, paymentMode: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_MODES.map((m) => (
+                        <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="space-y-1">
-              <Label>Description</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="e.g. Initial capital contribution"
-                rows={3}
-              />
-            </div>
+                <div className="space-y-1">
+                  <Label>Reference Number</Label>
+                  <Input
+                    value={form.referenceNumber}
+                    onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
+                    placeholder="e.g. TXN123456"
+                  />
+                </div>
 
-            <Button type="submit" className="w-full h-11 text-base bg-green-600 hover:bg-green-700">
+                <div className="space-y-1">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    placeholder="e.g. Initial capital contribution"
+                    rows={3}
+                  />
+                </div>
+              </>
+            )}
+
+            <Button type="submit" className="w-full h-11 text-base bg-green-600 hover:bg-green-700" disabled={!form.amount}>
               {editingId ? 'Save Changes' : 'Add Investment'}
             </Button>
           </form>

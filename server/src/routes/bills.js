@@ -19,8 +19,9 @@ router.get('/', authenticate, async (req, res) => {
 
     const filter = { organization: req.user.organization };
 
-    // Non-developers can only see bills for their assigned sites
-    if (req.user.role !== 1) {
+    // Supervisors/Workers can only see bills for their assigned sites
+    // Engineers (role 2) see all bills in the org for approval
+    if (req.user.role >= 3) {
       const sites = await Site.find({ assignedUsers: req.user._id }).select('_id');
       filter.site = { $in: sites.map(s => s._id) };
     }
