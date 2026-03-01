@@ -1,24 +1,26 @@
 import { useState, useEffect } from 'react'
 import { expensesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useToast } from '@/hooks/use-toast'
 import { useBulkSelect } from '@/hooks/use-bulk-select'
-import { useLoading } from '@/hooks/use-loading'
 import { useExpensePermissions } from '@/hooks/useExpensePermissions'
+import { ExpenseForm } from '@/components/expenses/ExpenseForm'
+import { ExpenseActions } from '@/components/expenses/ExpenseActions'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import {
-  ExpenseTable,
-  ExpenseForm,
-  ExpenseFilters,
-} from '@/components/expenses'
-import { formatCurrency } from '@/lib/utils'
-import { Plus, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
+  PageLayout, PageHeader, SummaryBanner, SearchFilterBar,
+  ListItem, ActionBtn, PagePagination, EmptyState,
+} from '@/components/page'
+import { Plus, Trash2, TrendingUp, Edit, CheckCircle } from 'lucide-react'
+
+const STATUS_COLORS = {
+  pending: 'bg-yellow-100 text-yellow-700',
+  approved: 'bg-blue-100 text-blue-700',
+  paid: 'bg-green-100 text-green-700',
+  rejected: 'bg-red-100 text-red-700',
+}
 
 export default function Expenses() {
   const permissions = useExpensePermissions()
@@ -27,37 +29,22 @@ export default function Expenses() {
   const [expenses, setExpenses] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [summary, setSummary] = useState({ total: 0, count: 0 })
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [editExpense, setEditExpense] = useState(null)
+  const [approveExpense, setApproveExpense] = useState(null)
+  const [approveAction, setApproveAction] = useState('approve')
+  const [search, setSearch] = useState('')
+  const [totalAmount, setTotalAmount] = useState(0)
+  const [filters, setFilters] = useState({ startDate: '', endDate: '' })
 
-  const [filters, setFilters] = useState({
-    siteId: '',
-    category: '',
-    startDate: '',
-    endDate: '',
-  })
-
-  // Use custom hooks
-  const loadingStates = useLoading()
   const bulkSelect = useBulkSelect(
     expenses,
     expensesApi.bulkDelete,
-    (count) => {
-      toast({ title: `${count} expense(s) deleted successfully` })
-      loadExpenses()
-    },
-    (error) => {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete expenses',
-        variant: 'destructive',
-      })
-    }
+    (count) => { toast({ title: `${count} expense(s) deleted` }); loadExpenses() },
+    (error) => { toast({ title: 'Error', description: error.response?.data?.message || 'Failed to delete', variant: 'destructive' }) }
   )
 
-  useEffect(() => {
-    loadExpenses()
-  }, [filters, pagination.page])
+  useEffect(() => { loadExpenses() }, [filters, pagination.page])
 
   const loadExpenses = async () => {
     setLoading(true)
@@ -65,182 +52,178 @@ export default function Expenses() {
       const params = {
         page: pagination.page,
         limit: 20,
-        ...filters,
+        ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
       }
-
-      // Remove empty filters
-      Object.keys(params).forEach((key) => {
-        if (!params[key]) delete params[key]
-      })
-
-      const response = await expensesApi.getAll(params)
-      const data = response.data
-      setExpenses(data.expenses || [])
+      const { data } = await expensesApi.getAll(params)
+      const list = data.expenses || []
+      setExpenses(list)
       setPagination(data.pagination || { page: 1, pages: 1, total: 0 })
-
-      // Calculate summary
-      const total = (data.expenses || []).reduce((sum, exp) => {
-        return sum + (exp.approvedAmount || exp.requestedAmount || 0)
-      }, 0)
-      setSummary({ total, count: data.expenses?.length || 0 })
-    } catch (error) {
-      console.error('Failed to load expenses:', error)
-      toast({
-        title: 'Error',
-        description: 'Failed to load expenses.',
-        variant: 'destructive',
-      })
+      setTotalAmount(list.reduce((s, e) => s + (e.approvedAmount || e.requestedAmount || 0), 0))
+    } catch {
+      toast({ title: 'Failed to load expenses', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
   }
 
-  const handlePageChange = (newPage) => {
-    setPagination((prev) => ({ ...prev, page: newPage }))
-  }
-
-  const handleFilterChange = (newFilters) => {
-    setFilters(newFilters)
-    setPagination((prev) => ({ ...prev, page: 1 })) // Reset to first page
-  }
-
-  const handleClearFilters = () => {
-    setFilters({
-      siteId: '',
-      category: '',
-      startDate: '',
-      endDate: '',
-    })
-    setPagination((prev) => ({ ...prev, page: 1 }))
-  }
-
-  const handleAddSuccess = () => {
-    setIsAddOpen(false)
+  const handleSuccess = () => {
+    setSheetOpen(false)
+    setEditExpense(null)
     loadExpenses()
-    toast({
-      title: 'Success',
-      description: 'Expense added successfully.',
-    })
+    toast({ title: editExpense ? 'Expense updated' : 'Expense added' })
   }
+
+  const openAdd = () => { setEditExpense(null); setSheetOpen(true) }
+  const openEdit = (expense) => { setEditExpense(expense); setSheetOpen(true) }
+
+  const handleDelete = async (expense) => {
+    if (!confirm('Delete this expense?')) return
+    try {
+      await expensesApi.delete(expense._id)
+      toast({ title: 'Expense deleted' })
+      loadExpenses()
+    } catch {
+      toast({ title: 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const filteredExpenses = expenses.filter((e) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      e.description?.toLowerCase().includes(q) ||
+      e.vendorName?.toLowerCase().includes(q) ||
+      e.site?.name?.toLowerCase().includes(q)
+    )
+  })
 
   return (
-    <div className="p-3 md:p-6 space-y-4 md:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-xl md:text-3xl font-bold tracking-tight">Expenses</h1>
-          <p className="text-xs md:text-base text-muted-foreground">Manage and track all expenses</p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          {bulkSelect.selectedCount > 0 && (
-            <Button
-              variant="destructive"
-              onClick={bulkSelect.deleteSelected}
-              disabled={bulkSelect.deleting}
-              className="w-full sm:w-auto"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              {bulkSelect.deleting ? 'Deleting...' : `Delete ${bulkSelect.selectedCount}`}
-            </Button>
-          )}
-          {permissions.canCreate && (
-            <Button onClick={() => setIsAddOpen(true)} disabled={loadingStates.creating} className="w-full sm:w-auto">
-              <Plus className="mr-2 h-4 w-4" />
-              {loadingStates.creating ? 'Adding...' : 'Add Expense'}
-            </Button>
-          )}
-        </div>
-      </div>
+    <PageLayout>
+      <PageHeader title="Expenses" subtitle={`${pagination.total} entries`}>
+        {bulkSelect.selectedCount > 0 && (
+          <Button size="sm" variant="destructive" onClick={bulkSelect.deleteSelected} disabled={bulkSelect.deleting}>
+            <Trash2 className="h-4 w-4 mr-1" />
+            Delete {bulkSelect.selectedCount}
+          </Button>
+        )}
+        {permissions.canCreate && (
+          <Button size="sm" onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Plus className="h-4 w-4 mr-1" />
+            Add
+          </Button>
+        )}
+      </PageHeader>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pagination.total}</div>
-            <p className="text-xs text-muted-foreground">All time</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Filtered Results</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary.count}</div>
-            <p className="text-xs text-muted-foreground">On this page</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Amount (Page)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(summary.total)}</div>
-            <p className="text-xs text-muted-foreground">Current page total</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <ExpenseFilters
-        filters={filters}
-        onChange={handleFilterChange}
-        onClear={handleClearFilters}
+      <SummaryBanner
+        color="blue"
+        icon={<TrendingUp className="h-8 w-8" />}
+        items={[{ label: 'Total this page', value: formatCurrency(totalAmount) }]}
       />
 
-      {/* Expenses Table */}
-      <Card>
-        <CardContent className="pt-6">
-          <ExpenseTable
-            expenses={expenses}
-            loading={loading}
-            onRefresh={loadExpenses}
-            showSiteColumn={true}
-            bulkSelect={bulkSelect}
+      <SearchFilterBar
+        search={search}
+        onSearch={setSearch}
+        placeholder="Search description, vendor, site..."
+      >
+        <Input type="date" className="h-9 text-sm w-36" value={filters.startDate}
+          onChange={(e) => setFilters((f) => ({ ...f, startDate: e.target.value }))} />
+        <Input type="date" className="h-9 text-sm w-36" value={filters.endDate}
+          onChange={(e) => setFilters((f) => ({ ...f, endDate: e.target.value }))} />
+        {(filters.startDate || filters.endDate) && (
+          <Button variant="ghost" size="sm" onClick={() => setFilters({ startDate: '', endDate: '' })}>Clear</Button>
+        )}
+      </SearchFilterBar>
+
+      <div className="flex-1">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        ) : filteredExpenses.length === 0 ? (
+          <EmptyState
+            message="No expenses found"
+            action={permissions.canCreate && (
+              <Button variant="outline" size="sm" onClick={openAdd}>
+                <Plus className="h-4 w-4 mr-1" /> Add First Expense
+              </Button>
+            )}
           />
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filteredExpenses.map((expense) => (
+              <ListItem
+                key={expense._id}
+                avatar={(expense.vendorName || expense.description || 'E').charAt(0)}
+                avatarColor="blue"
+                title={expense.description || expense.vendorName || 'Expense'}
+                subtitle={
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-gray-400">{formatDate(expense.expenseDate)}</span>
+                    {expense.site?.name && <span className="text-xs text-gray-400">• {expense.site.name}</span>}
+                    {expense.vendorName && expense.description && (
+                      <span className="text-xs text-gray-400">• {expense.vendorName}</span>
+                    )}
+                  </div>
+                }
+                amount={formatCurrency(expense.approvedAmount || expense.requestedAmount || 0)}
+                badge={{ label: expense.status, className: STATUS_COLORS[expense.status] || '' }}
+                selected={bulkSelect.isSelected(expense._id)}
+                onSelect={() => bulkSelect.toggleSelect(expense._id)}
+                actions={
+                  <>
+                    {permissions.canEdit(expense) && (
+                      <ActionBtn onClick={() => openEdit(expense)} title="Edit" icon={Edit} />
+                    )}
+                    {permissions.canApprove && expense.status === 'pending' && (
+                      <ActionBtn
+                        onClick={() => { setApproveExpense(expense); setApproveAction('approve') }}
+                        title="Approve"
+                        icon={CheckCircle}
+                        hoverClass="hover:text-green-600 hover:bg-green-50"
+                      />
+                    )}
+                    {permissions.canDelete(expense) && (
+                      <ActionBtn
+                        onClick={() => handleDelete(expense)}
+                        title="Delete"
+                        icon={Trash2}
+                        hoverClass="hover:text-red-600 hover:bg-red-50"
+                      />
+                    )}
+                  </>
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
-          {/* Pagination */}
-          {pagination.pages > 1 && (
-            <div className="flex items-center justify-between mt-4 pt-4 border-t">
-              <div className="text-sm text-muted-foreground">
-                Page {pagination.page} of {pagination.pages} ({pagination.total} total)
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(pagination.page - 1)}
-                  disabled={pagination.page === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(pagination.page + 1)}
-                  disabled={pagination.page === pagination.pages}
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <PagePagination
+        page={pagination.page}
+        pages={pagination.pages}
+        total={pagination.total}
+        onChange={(page) => setPagination((p) => ({ ...p, page }))}
+      />
 
-      {/* Add Expense Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Add New Expense</DialogTitle>
-          </DialogHeader>
-          <ExpenseForm onSuccess={handleAddSuccess} onCancel={() => setIsAddOpen(false)} />
-        </DialogContent>
-      </Dialog>
-    </div>
+      <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) setEditExpense(null) }}>
+        <SheetContent title={editExpense ? 'Edit Expense' : 'Add Expense'}>
+          <div className="px-5 py-4">
+            <ExpenseForm
+              expense={editExpense}
+              onSuccess={handleSuccess}
+              onCancel={() => { setSheetOpen(false); setEditExpense(null) }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <ExpenseActions
+        expense={approveExpense}
+        action={approveAction}
+        isOpen={!!approveExpense}
+        onClose={() => setApproveExpense(null)}
+        onSuccess={() => { setApproveExpense(null); loadExpenses() }}
+      />
+    </PageLayout>
   )
 }

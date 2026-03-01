@@ -5,16 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import {
   Dialog,
   DialogContent,
@@ -32,7 +23,10 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, TrendingUp, Wallet, PiggyBank, ChevronLeft, ChevronRight, Trash2, Edit, Receipt, Users, Building2, ArrowRight, ArrowDownToLine } from 'lucide-react'
+import { Plus, TrendingUp, PiggyBank, ArrowDownToLine, Edit, Trash2, Receipt, Users, Building2 } from 'lucide-react'
+import {
+  PageLayout, PageHeader, SummaryBanner, ListItem, ActionBtn, PagePagination, EmptyState,
+} from '@/components/page'
 
 const PAYMENT_MODES = [
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -43,7 +37,7 @@ const PAYMENT_MODES = [
 ]
 
 export default function Investments() {
-  const { user, isAdmin } = useAuth()
+  const { isAdmin } = useAuth()
   const { toast } = useToast()
 
   const [investments, setInvestments] = useState([])
@@ -51,9 +45,10 @@ export default function Investments() {
   const [summary, setSummary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
-  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
+  const [withdrawing, setWithdrawing] = useState(false)
 
   const [form, setForm] = useState({
     partnerId: '',
@@ -71,7 +66,6 @@ export default function Investments() {
     referenceNumber: '',
     paymentMode: 'bank_transfer',
   })
-  const [withdrawing, setWithdrawing] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -88,12 +82,8 @@ export default function Investments() {
       setInvestments(investmentsRes.data.investments)
       setPagination(investmentsRes.data.pagination)
       setSummary(summaryRes.data)
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch investments',
-        variant: 'destructive',
-      })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to fetch investments', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -120,7 +110,7 @@ export default function Investments() {
           referenceNumber: form.referenceNumber,
           paymentMode: form.paymentMode,
         })
-        toast({ title: 'Investment updated successfully' })
+        toast({ title: 'Investment updated' })
       } else {
         await investmentsApi.create({
           partnerId: form.partnerId,
@@ -130,17 +120,13 @@ export default function Investments() {
           referenceNumber: form.referenceNumber,
           paymentMode: form.paymentMode,
         })
-        toast({ title: 'Investment added successfully' })
+        toast({ title: 'Investment added' })
       }
-      setIsAddOpen(false)
+      setSheetOpen(false)
       resetForm()
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to save investment',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to save', variant: 'destructive' })
     }
   }
 
@@ -154,21 +140,17 @@ export default function Investments() {
       paymentMode: investment.paymentMode,
     })
     setEditingId(investment._id)
-    setIsAddOpen(true)
+    setSheetOpen(true)
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Are you sure you want to delete this investment?')) return
+    if (!confirm('Delete this investment?')) return
     try {
       await investmentsApi.delete(id)
       toast({ title: 'Investment deleted' })
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete investment',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to delete', variant: 'destructive' })
     }
   }
 
@@ -188,563 +170,340 @@ export default function Investments() {
     e.preventDefault()
     setWithdrawing(true)
     try {
-      const response = await investmentsApi.withdraw({
+      await investmentsApi.withdraw({
         partnerId: withdrawForm.partnerId,
         amount: parseFloat(withdrawForm.amount),
         description: withdrawForm.description,
         referenceNumber: withdrawForm.referenceNumber,
         paymentMode: withdrawForm.paymentMode,
       })
-      toast({
-        title: 'Withdrawal successful',
-        description: `${formatCurrency(withdrawForm.amount)} credited to your wallet`
-      })
+      toast({ title: 'Withdrawal successful', description: `${formatCurrency(withdrawForm.amount)} credited to wallet` })
       setIsWithdrawOpen(false)
       resetWithdrawForm()
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to process withdrawal',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to process withdrawal', variant: 'destructive' })
     } finally {
       setWithdrawing(false)
     }
   }
 
   const resetWithdrawForm = () => {
-    setWithdrawForm({
-      partnerId: '',
-      amount: '',
-      description: '',
-      referenceNumber: '',
-      paymentMode: 'bank_transfer',
-    })
+    setWithdrawForm({ partnerId: '', amount: '', description: '', referenceNumber: '', paymentMode: 'bank_transfer' })
   }
 
   if (!isAdmin) {
     return (
-      <div className="text-center py-12">
-        <h2 className="text-xl font-semibold">Access Denied</h2>
-        <p className="text-muted-foreground">Only developers can manage investments</p>
+      <div className="flex items-center justify-center h-64 flex-col gap-2">
+        <PiggyBank className="h-12 w-12 text-gray-300" />
+        <p className="text-gray-500 font-medium">Only developers can manage investments</p>
       </div>
     )
   }
 
+  const utilizationPct = summary?.totalInvestment > 0
+    ? ((summary.totalExpenses / summary.totalInvestment) * 100).toFixed(1)
+    : '0'
+
   return (
-    <div className="space-y-4 md:space-y-6 p-3 md:p-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4">
-        <div>
-          <h1 className="text-xl md:text-3xl font-bold">Partner Investments</h1>
-          <p className="text-muted-foreground text-xs md:text-base">
-            Track partner contributions and fund usage
-          </p>
-        </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-          {summary && summary.remainingFunds > 0 && (
-            <Button
-              onClick={() => { resetWithdrawForm(); setIsWithdrawOpen(true); }}
-              variant="outline"
-              className="flex-1 sm:flex-initial text-green-600 hover:text-green-700 border-green-600 hover:border-green-700"
-              title={`Available: ${formatCurrency(summary.remainingFunds)}`}
-            >
-              <ArrowDownToLine className="h-4 w-4 mr-2" />
-              <span className="hidden sm:inline">Withdraw {formatCurrency(summary.remainingFunds)}</span>
-              <span className="sm:hidden">Withdraw</span>
-            </Button>
-          )}
+    <PageLayout>
+      <PageHeader title="Partner Investments" subtitle={`${pagination.total} entries`}>
+        {summary?.remainingFunds > 0 && (
           <Button
-            onClick={() => { resetForm(); setIsAddOpen(true); }}
-            className="flex-1 sm:flex-initial"
+            size="sm"
+            variant="outline"
+            onClick={() => { resetWithdrawForm(); setIsWithdrawOpen(true) }}
+            className="text-green-600 border-green-300 hover:bg-green-50"
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Investment
+            <ArrowDownToLine className="h-4 w-4 mr-1" />
+            Withdraw
           </Button>
-        </div>
-      </div>
+        )}
+        <Button size="sm" onClick={() => { resetForm(); setSheetOpen(true) }} className="bg-green-600 hover:bg-green-700 text-white">
+          <Plus className="h-4 w-4 mr-1" />
+          Add
+        </Button>
+      </PageHeader>
 
-      {/* Summary Cards */}
+      <SummaryBanner
+        color="green"
+        icon={<PiggyBank className="h-8 w-8" />}
+        items={[
+          { label: 'Total Invested', value: formatCurrency(summary?.totalInvestment || 0) },
+          { label: 'Total Utilized', value: formatCurrency(summary?.totalExpenses || 0) },
+          { label: 'Remaining', value: formatCurrency(summary?.remainingFunds || 0) },
+        ]}
+      />
+
+      {/* Fund Utilization Breakdown */}
       {summary && (
-        <>
-          {/* Main Summary Row */}
-          <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-                <CardTitle className="text-xs md:text-sm font-medium">Total Invested</CardTitle>
-                <PiggyBank className="h-3 w-3 md:h-4 md:w-4 text-green-500" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                <div className="text-lg md:text-2xl font-bold text-green-600">{formatCurrency(summary.totalInvestment)}</div>
-                <p className="text-[10px] md:text-xs text-muted-foreground">{summary.partnerInvestments?.length || 0} partners</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-                <CardTitle className="text-xs md:text-sm font-medium">Total Utilized</CardTitle>
-                <Wallet className="h-3 w-3 md:h-4 md:w-4 text-blue-500" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                <div className="text-lg md:text-2xl font-bold text-blue-600">{formatCurrency(summary.totalExpenses)}</div>
-                <p className="text-[10px] md:text-xs text-muted-foreground">All categories</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-                <CardTitle className="text-xs md:text-sm font-medium">Remaining</CardTitle>
-                <TrendingUp className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                <div className={`text-lg md:text-2xl font-bold ${summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatCurrency(summary.remainingFunds)}
-                </div>
-                <p className="text-[10px] md:text-xs text-muted-foreground">
-                  {summary.totalInvestment > 0
-                    ? `${((summary.remainingFunds / summary.totalInvestment) * 100).toFixed(1)}% left`
-                    : 'No investments'}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-                <CardTitle className="text-xs md:text-sm font-medium">Utilization</CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-                <div className="text-lg md:text-2xl font-bold">
-                  {summary.totalInvestment > 0
-                    ? `${((summary.totalExpenses / summary.totalInvestment) * 100).toFixed(1)}%`
-                    : '0%'}
-                </div>
-                <p className="text-[10px] md:text-xs text-muted-foreground">Of total</p>
-              </CardContent>
-            </Card>
+        <div className="px-4 pb-2 grid grid-cols-4 gap-2">
+          <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
+            <div className="flex items-center gap-1 mb-1">
+              <Building2 className="h-3 w-3 text-orange-500" />
+              <p className="text-[10px] text-orange-600 font-semibold uppercase tracking-wide">Expenses</p>
+            </div>
+            <p className="text-sm font-bold text-orange-700">{formatCurrency(summary.expenses?.total || 0)}</p>
           </div>
-
-          {/* Fund Utilization Breakdown */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ArrowRight className="h-5 w-5" />
-                Fund Utilization Breakdown
-              </CardTitle>
-              <CardDescription>How invested funds are being utilized</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
-                {/* Site Expenses */}
-                <div className="p-4 border rounded-lg bg-orange-50 dark:bg-orange-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Building2 className="h-5 w-5 text-orange-500" />
-                    <span className="font-medium">Site Expenses</span>
-                  </div>
-                  <div className="text-2xl font-bold text-orange-600">
-                    {formatCurrency(summary.expenses?.total || 0)}
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Operational & misc expenses
-                  </p>
-                </div>
-
-                {/* Material & GST Bills */}
-                <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Receipt className="h-5 w-5 text-blue-500" />
-                    <span className="font-medium">Material & GST Bills</span>
-                  </div>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {formatCurrency(summary.bills?.total || 0)}
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-1 space-y-1">
-                    <p>Base: {formatCurrency(summary.bills?.baseAmount || 0)}</p>
-                    <p>GST: {formatCurrency(summary.bills?.gstAmount || 0)}</p>
-                    <p>{summary.bills?.count || 0} bills</p>
-                  </div>
-                </div>
-
-                {/* Labor & Salaries */}
-                <div className="p-4 border rounded-lg bg-purple-50 dark:bg-purple-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Users className="h-5 w-5 text-purple-500" />
-                    <span className="font-medium">Labor & Salaries</span>
-                  </div>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {formatCurrency(summary.workerLedger?.netPayable || 0)}
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-1 space-y-1">
-                    <p>Credits: {formatCurrency(summary.workerLedger?.credits || 0)}</p>
-                    <p>Debits: {formatCurrency(summary.workerLedger?.debits || 0)}</p>
-                  </div>
-                </div>
-
-                {/* Funds Allocated */}
-                <div className="p-4 border rounded-lg bg-cyan-50 dark:bg-cyan-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Wallet className="h-5 w-5 text-cyan-500" />
-                    <span className="font-medium">Funds Allocated</span>
-                  </div>
-                  <div className="text-2xl font-bold text-cyan-600">
-                    {formatCurrency(summary.fundAllocations?.totalDisbursed || 0)}
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Disbursed to users
-                  </p>
-                </div>
-              </div>
-
-              {/* Fund Flow Visualization */}
-              <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                <h4 className="font-medium mb-3">Fund Flow Summary</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Total Investment</span>
-                    <span className="font-medium text-green-600">+ {formatCurrency(summary.totalInvestment)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm text-muted-foreground">
-                    <span className="ml-4">- Site Expenses</span>
-                    <span>- {formatCurrency(summary.expenses?.total || 0)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm text-muted-foreground">
-                    <span className="ml-4">- Material & Bills</span>
-                    <span>- {formatCurrency(summary.bills?.total || 0)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm text-muted-foreground">
-                    <span className="ml-4">- Labor & Salaries</span>
-                    <span>- {formatCurrency(summary.workerLedger?.netPayable || 0)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm text-muted-foreground">
-                    <span className="ml-4">- Funds Allocated</span>
-                    <span>- {formatCurrency(summary.fundAllocations?.totalDisbursed || 0)}</span>
-                  </div>
-                  <div className="border-t pt-2 flex justify-between items-center font-medium">
-                    <span>Available to Withdraw</span>
-                    <span className={summary.remainingFunds >= 0 ? 'text-green-600' : 'text-red-600'}>
-                      = {formatCurrency(summary.remainingFunds)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bills by Type */}
-              {summary.bills?.byType?.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="font-medium mb-2">Bills by Category</h4>
-                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
-                    {summary.bills.byType.map((item) => (
-                      <div key={item._id} className="flex justify-between p-2 border rounded text-sm">
-                        <span className="capitalize">{item._id}</span>
-                        <span className="font-medium">{formatCurrency(item.total)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Worker Ledger by Category */}
-              {summary.workerLedger?.byCategory?.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="font-medium mb-2">Labor Costs by Category</h4>
-                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
-                    {summary.workerLedger.byCategory.map((item) => (
-                      <div key={item._id} className="flex justify-between p-2 border rounded text-sm">
-                        <span className="capitalize">{item._id}</span>
-                        <span className="font-medium">
-                          {formatCurrency(item.credits - item.debits)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
+          <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+            <div className="flex items-center gap-1 mb-1">
+              <Receipt className="h-3 w-3 text-blue-500" />
+              <p className="text-[10px] text-blue-600 font-semibold uppercase tracking-wide">Bills</p>
+            </div>
+            <p className="text-sm font-bold text-blue-700">{formatCurrency(summary.bills?.total || 0)}</p>
+          </div>
+          <div className="p-3 bg-purple-50 rounded-xl border border-purple-100">
+            <div className="flex items-center gap-1 mb-1">
+              <Users className="h-3 w-3 text-purple-500" />
+              <p className="text-[10px] text-purple-600 font-semibold uppercase tracking-wide">Labour</p>
+            </div>
+            <p className="text-sm font-bold text-purple-700">{formatCurrency(summary.workerLedger?.netPayable || 0)}</p>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+            <div className="flex items-center gap-1 mb-1">
+              <TrendingUp className="h-3 w-3 text-gray-500" />
+              <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide">Used %</p>
+            </div>
+            <p className="text-sm font-bold text-gray-700">{utilizationPct}%</p>
+          </div>
+        </div>
       )}
 
       {/* Partner Breakdown */}
       {summary?.partnerInvestments?.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Investment by Partner</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+        <div className="px-4 pb-2">
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">By Partner</p>
+            <div className="space-y-2">
               {summary.partnerInvestments.map((item) => (
-                <div key={item.partner?._id} className="flex items-center justify-between p-4 border rounded-lg">
+                <div key={item.partner?._id} className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium">{item.partner?.name}</p>
-                    <p className="text-sm text-muted-foreground">{item.count} investments</p>
+                    <p className="text-sm font-medium text-gray-800">{item.partner?.name}</p>
+                    <p className="text-xs text-gray-400">{item.count} investments</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold">{formatCurrency(item.totalInvested)}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm font-bold">{formatCurrency(item.totalInvested)}</p>
+                    <p className="text-xs text-gray-400">
                       {((item.totalInvested / summary.totalInvestment) * 100).toFixed(1)}%
                     </p>
                   </div>
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
-      {/* Investments Table */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>Investment History</CardTitle>
-          <CardDescription>Showing {investments.length} of {pagination.total} entries</CardDescription>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Partner</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Reference</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
-                  <div className="flex justify-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
+      {/* Investments List */}
+      <div className="flex-1">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600" />
+          </div>
+        ) : investments.length === 0 ? (
+          <EmptyState
+            message="No investments recorded yet"
+            action={
+              <Button variant="outline" size="sm" onClick={() => { resetForm(); setSheetOpen(true) }}>
+                <Plus className="h-4 w-4 mr-1" /> Add First Investment
+              </Button>
+            }
+            icon={<PiggyBank className="h-12 w-12" />}
+          />
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {investments.map((investment) => (
+              <ListItem
+                key={investment._id}
+                avatar={investment.partner?.name}
+                avatarColor="green"
+                title={investment.partner?.name}
+                subtitle={
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-gray-400">{formatDate(investment.investmentDate)}</span>
+                    <span className="text-xs text-gray-400">
+                      • {PAYMENT_MODES.find(m => m.value === investment.paymentMode)?.label}
+                    </span>
+                    {investment.referenceNumber && (
+                      <span className="text-xs text-gray-400">• {investment.referenceNumber}</span>
+                    )}
+                    {investment.description && (
+                      <span className="text-xs text-gray-400">• {investment.description}</span>
+                    )}
                   </div>
-                </TableCell>
-              </TableRow>
-            ) : investments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                  No investments recorded yet
-                </TableCell>
-              </TableRow>
-            ) : (
-              investments.map((investment) => (
-                <TableRow key={investment._id}>
-                  <TableCell>{formatDate(investment.investmentDate)}</TableCell>
-                  <TableCell className="font-medium">{investment.partner?.name}</TableCell>
-                  <TableCell className="max-w-[200px] truncate">{investment.description || '-'}</TableCell>
-                  <TableCell>{investment.referenceNumber || '-'}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {PAYMENT_MODES.find(m => m.value === investment.paymentMode)?.label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-bold">{formatCurrency(investment.amount)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(investment)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(investment._id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-        </div>
-      </Card>
+                }
+                amount={formatCurrency(investment.amount)}
+                actions={
+                  <>
+                    <ActionBtn onClick={() => handleEdit(investment)} title="Edit" icon={Edit} />
+                    <ActionBtn
+                      onClick={() => handleDelete(investment._id)}
+                      title="Delete"
+                      icon={Trash2}
+                      hoverClass="hover:text-red-600 hover:bg-red-50"
+                    />
+                  </>
+                }
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
-      {/* Pagination */}
-      {pagination.pages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={pagination.page === 1}
-            onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm">Page {pagination.page} of {pagination.pages}</span>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={pagination.page === pagination.pages}
-            onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
+      <PagePagination
+        page={pagination.page}
+        pages={pagination.pages}
+        total={pagination.total}
+        onChange={(page) => setPagination((p) => ({ ...p, page }))}
+      />
 
-      {/* Add/Edit Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle>{editingId ? 'Edit' : 'Add'} Investment</DialogTitle>
-              <DialogDescription>Record a partner investment contribution</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              {!editingId && (
-                <div className="space-y-2">
-                  <Label>Partner</Label>
-                  <Select
-                    value={form.partnerId}
-                    onValueChange={(value) => setForm({ ...form, partnerId: value })}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select partner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {partners.map((partner) => (
-                        <SelectItem key={partner._id} value={partner._id}>
-                          {partner.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>Amount (Rs.)</Label>
-                <Input
-                  type="number"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  placeholder="100000"
-                  required
-                  min="0"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Initial capital contribution"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={form.investmentDate}
-                  onChange={(e) => setForm({ ...form, investmentDate: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Reference Number</Label>
-                <Input
-                  value={form.referenceNumber}
-                  onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
-                  placeholder="TXN123456"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Payment Mode</Label>
+      {/* Add/Edit Sheet */}
+      <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
+        <SheetContent title={editingId ? 'Edit Investment' : 'Add Investment'}>
+          <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+            {!editingId && (
+              <div className="space-y-1">
+                <Label>Partner *</Label>
                 <Select
-                  value={form.paymentMode}
-                  onValueChange={(value) => setForm({ ...form, paymentMode: value })}
+                  value={form.partnerId}
+                  onValueChange={(v) => setForm({ ...form, partnerId: v })}
+                  required
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_MODES.map((mode) => (
-                      <SelectItem key={mode.value} value={mode.value}>
-                        {mode.label}
-                      </SelectItem>
+                    {partners.map((p) => (
+                      <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
+            )}
+
+            <div className="space-y-1">
+              <Label>Amount (₹) *</Label>
+              <Input
+                type="number"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                placeholder="e.g. 100000"
+                required
+                min="0"
+              />
             </div>
-            <DialogFooter>
-              <Button type="submit">{editingId ? 'Update' : 'Add'} Investment</Button>
-            </DialogFooter>
+
+            <div className="space-y-1">
+              <Label>Date *</Label>
+              <Input
+                type="date"
+                value={form.investmentDate}
+                onChange={(e) => setForm({ ...form, investmentDate: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Payment Mode</Label>
+              <Select value={form.paymentMode} onValueChange={(v) => setForm({ ...form, paymentMode: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_MODES.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Reference Number</Label>
+              <Input
+                value={form.referenceNumber}
+                onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
+                placeholder="e.g. TXN123456"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="e.g. Initial capital contribution"
+                rows={3}
+              />
+            </div>
+
+            <Button type="submit" className="w-full h-11 text-base bg-green-600 hover:bg-green-700">
+              {editingId ? 'Save Changes' : 'Add Investment'}
+            </Button>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       {/* Withdraw Dialog */}
-      <Dialog open={isWithdrawOpen} onOpenChange={(open) => { setIsWithdrawOpen(open); if (!open) resetWithdrawForm(); }}>
+      <Dialog open={isWithdrawOpen} onOpenChange={(open) => { setIsWithdrawOpen(open); if (!open) resetWithdrawForm() }}>
         <DialogContent className="max-w-md">
           <form onSubmit={handleWithdraw}>
             <DialogHeader>
               <DialogTitle>Withdraw Available Funds</DialogTitle>
-              <DialogDescription>Withdraw from investment pool to your wallet</DialogDescription>
+              <DialogDescription>Withdraw from investment pool to wallet</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-              {/* Available Funds Display */}
               {summary && (
-                <div className="p-4 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-green-900 dark:text-green-100">Available to Withdraw</p>
-                      <p className="text-xs text-green-700 dark:text-green-300 mt-1">
-                        Total: {formatCurrency(summary.totalInvestment)} - Utilized: {formatCurrency(summary.totalExpenses)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                        {formatCurrency(summary.remainingFunds)}
-                      </p>
-                    </div>
-                  </div>
+                <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                  <p className="text-sm text-green-700 font-medium">Available to Withdraw</p>
+                  <p className="text-2xl font-bold text-green-600 mt-1">{formatCurrency(summary.remainingFunds)}</p>
                 </div>
               )}
 
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Partner *</Label>
                 <Select
                   value={withdrawForm.partnerId}
-                  onValueChange={(value) => setWithdrawForm({ ...withdrawForm, partnerId: value })}
+                  onValueChange={(v) => setWithdrawForm({ ...withdrawForm, partnerId: v })}
                   required
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select partner withdrawing" />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select partner withdrawing" /></SelectTrigger>
                   <SelectContent>
-                    {partners.map((partner) => (
-                      <SelectItem key={partner._id} value={partner._id}>
-                        {partner.name}
-                      </SelectItem>
+                    {partners.map((p) => (
+                      <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Amount (Rs.) *</Label>
+              <div className="space-y-1">
+                <Label>Amount (₹) *</Label>
                 <Input
                   type="number"
                   value={withdrawForm.amount}
                   onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
-                  placeholder="Enter amount to withdraw"
+                  placeholder="Enter amount"
                   required
                   min="1"
                   max={summary?.remainingFunds || 0}
                   step="0.01"
                 />
                 {summary && (
-                  <p className="text-xs text-muted-foreground">
-                    Maximum: {formatCurrency(summary.remainingFunds)}
-                  </p>
+                  <p className="text-xs text-gray-400">Maximum: {formatCurrency(summary.remainingFunds)}</p>
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={withdrawForm.description}
-                  onChange={(e) => setWithdrawForm({ ...withdrawForm, description: e.target.value })}
-                  placeholder="Purpose of withdrawal (optional)"
-                  rows={3}
-                />
+              <div className="space-y-1">
+                <Label>Payment Mode</Label>
+                <Select
+                  value={withdrawForm.paymentMode}
+                  onValueChange={(v) => setWithdrawForm({ ...withdrawForm, paymentMode: v })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PAYMENT_MODES.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Reference Number</Label>
                 <Input
                   value={withdrawForm.referenceNumber}
@@ -753,23 +512,14 @@ export default function Investments() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label>Payment Mode</Label>
-                <Select
-                  value={withdrawForm.paymentMode}
-                  onValueChange={(value) => setWithdrawForm({ ...withdrawForm, paymentMode: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_MODES.map((mode) => (
-                      <SelectItem key={mode.value} value={mode.value}>
-                        {mode.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-1">
+                <Label>Description</Label>
+                <Textarea
+                  value={withdrawForm.description}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, description: e.target.value })}
+                  placeholder="Purpose of withdrawal (optional)"
+                  rows={2}
+                />
               </div>
             </div>
             <DialogFooter>
@@ -783,6 +533,6 @@ export default function Investments() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageLayout>
   )
 }

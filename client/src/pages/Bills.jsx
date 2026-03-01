@@ -5,25 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import {
   Select,
   SelectContent,
@@ -35,17 +18,14 @@ import { useToast } from '@/hooks/use-toast'
 import { useBulkSelect } from '@/hooks/use-bulk-select'
 import { useLoading } from '@/hooks/use-loading'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Receipt, FileText, CreditCard, ChevronLeft, ChevronRight, Trash2, Edit, Check, Filter, Download, Upload, Eye, X, TrendingUp } from 'lucide-react'
+import {
+  PageLayout, PageHeader, SummaryBanner, SearchFilterBar,
+  ListItem, ActionBtn, PagePagination, EmptyState,
+} from '@/components/page'
+import {
+  Plus, FileText, Trash2, Edit, Check, Download, Upload, Eye, IndianRupee,
+} from 'lucide-react'
 import { FundAllocationSelector } from '@/components/FundAllocationSelector'
-
-const BILL_TYPES = [
-  { value: 'material', label: 'Material' },
-  { value: 'service', label: 'Service' },
-  { value: 'labor', label: 'Labor' },
-  { value: 'equipment', label: 'Equipment' },
-  { value: 'utility', label: 'Utility' },
-  { value: 'other', label: 'Other' },
-]
 
 const GST_RATES = [
   { value: 0, label: '0% (Exempt)' },
@@ -55,68 +35,36 @@ const GST_RATES = [
   { value: 28, label: '28%' },
 ]
 
-const PAYMENT_METHODS = [
-  { value: 'cash', label: 'Cash' },
-  { value: 'bank_transfer', label: 'Bank Transfer' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'upi', label: 'UPI' },
-  { value: 'neft', label: 'NEFT' },
-  { value: 'rtgs', label: 'RTGS' },
-  { value: 'other', label: 'Other' },
-]
-
 const STATUS_COLORS = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  credited: 'bg-blue-100 text-blue-800',
-  paid: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
+  pending: 'bg-yellow-100 text-yellow-700',
+  credited: 'bg-blue-100 text-blue-700',
+  paid: 'bg-green-100 text-green-700',
+  rejected: 'bg-red-100 text-red-700',
 }
 
 export default function Bills() {
   const { isAdmin } = useAuth()
   const { toast } = useToast()
+  const loadingStates = useLoading()
 
   const [bills, setBills] = useState([])
-  const [sites, setSites] = useState([])
   const [summary, setSummary] = useState(null)
+  const [sites, setSites] = useState([])
+  const [vendorSuggestions, setVendorSuggestions] = useState([])
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
-  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [viewBill, setViewBill] = useState(null)
-  const [vendorSuggestions, setVendorSuggestions] = useState([])
-  const [uploadingReceipt, setUploadingReceipt] = useState(null)
   const [exporting, setExporting] = useState(false)
-
-  const [filters, setFilters] = useState({
-    siteId: '',
-    status: '',
-    billType: '',
-  })
-
-  // Use custom hooks
-  const loadingStates = useLoading()
-  const bulkSelect = useBulkSelect(
-    bills,
-    billsApi.bulkDelete,
-    (count) => {
-      toast({ title: `${count} bill(s) deleted successfully` })
-      fetchData()
-    },
-    (error) => {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete bills',
-        variant: 'destructive',
-      })
-    }
-  )
+  const [uploadingReceipt, setUploadingReceipt] = useState(null)
+  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState({ status: '', startDate: '', endDate: '' })
 
   const [form, setForm] = useState({
     siteId: '',
     fundAllocationId: '',
     vendorName: '',
-    vendorGstNumber: '',
     invoiceNumber: '',
     billDate: new Date().toISOString().split('T')[0],
     totalAmount: '',
@@ -124,39 +72,36 @@ export default function Bills() {
     gstAmount: '',
     gstRate: 18,
     description: '',
-    billType: 'material',
-    paymentMethod: '',
-    paymentReference: '',
   })
 
-  useEffect(() => {
-    fetchSites()
-  }, [])
+  const bulkSelect = useBulkSelect(
+    bills,
+    billsApi.bulkDelete,
+    (count) => { toast({ title: `${count} bill(s) deleted` }); fetchData() },
+    (error) => { toast({ title: 'Error', description: error.response?.data?.message || 'Failed to delete', variant: 'destructive' }) }
+  )
 
-  useEffect(() => {
-    fetchData()
-  }, [pagination.page, filters])
+  useEffect(() => { fetchInitial() }, [])
+  useEffect(() => { fetchData() }, [pagination.page, filters])
 
-  const fetchSites = async () => {
+  const fetchInitial = async () => {
     try {
-      const [sitesRes, vendorsRes] = await Promise.all([
+      const [vendorsRes, sitesRes] = await Promise.all([
+        billsApi.getVendorSuggestions(),
         sitesApi.getAll(),
-        billsApi.getVendorSuggestions()
       ])
-      setSites(sitesRes.data)
       setVendorSuggestions(vendorsRes.data || [])
-    } catch (error) {
-      console.error('Error fetching data:', error)
-    }
+      setSites(sitesRes.data || [])
+    } catch (e) { console.error(e) }
   }
 
   const fetchData = async () => {
+    setLoading(true)
     try {
-      setLoading(true)
       const params = {
         page: pagination.page,
         limit: 20,
-        ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v)),
+        ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
       }
       const [billsRes, summaryRes] = await Promise.all([
         billsApi.getAll(params),
@@ -165,12 +110,8 @@ export default function Bills() {
       setBills(billsRes.data.bills)
       setPagination(billsRes.data.pagination)
       setSummary(summaryRes.data)
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch bills',
-        variant: 'destructive',
-      })
+    } catch {
+      toast({ title: 'Failed to fetch bills', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -183,35 +124,27 @@ export default function Bills() {
         siteId: form.siteId || null,
         fundAllocationId: form.fundAllocationId || null,
         vendorName: form.vendorName,
-        vendorGstNumber: form.vendorGstNumber,
         invoiceNumber: form.invoiceNumber,
         billDate: form.billDate,
         baseAmount: parseFloat(form.baseAmount),
         gstAmount: parseFloat(form.gstAmount) || 0,
         gstRate: parseInt(form.gstRate) || 18,
         description: form.description,
-        billType: form.billType,
-        paymentMethod: form.paymentMethod || null,
-        paymentReference: form.paymentReference || null,
+        billType: 'material',
       }
-
       try {
         if (editingId) {
           await billsApi.update(editingId, billData)
-          toast({ title: 'Bill updated successfully' })
+          toast({ title: 'Bill updated' })
         } else {
           await billsApi.create(billData)
-          toast({ title: 'Bill added successfully' })
+          toast({ title: 'Bill added' })
         }
-        setIsAddOpen(false)
+        setSheetOpen(false)
         resetForm()
         fetchData()
       } catch (error) {
-        toast({
-          title: 'Error',
-          description: error.response?.data?.message || 'Failed to save bill',
-          variant: 'destructive',
-        })
+        toast({ title: 'Error', description: error.response?.data?.message || 'Failed to save', variant: 'destructive' })
       }
     })
   }
@@ -222,21 +155,15 @@ export default function Bills() {
       toast({ title: `Bill marked as ${status}` })
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to update status',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to update', variant: 'destructive' })
     }
   }
 
   const handleEdit = (bill) => {
     const totalAmount = bill.totalAmount || (parseFloat(bill.baseAmount) + parseFloat(bill.gstAmount))
     setForm({
-      siteId: bill.site?._id || '',
       fundAllocationId: bill.fundAllocation?._id || '',
       vendorName: bill.vendorName,
-      vendorGstNumber: bill.vendorGstNumber || '',
       invoiceNumber: bill.invoiceNumber || '',
       billDate: bill.billDate.split('T')[0],
       totalAmount: totalAmount.toString(),
@@ -244,26 +171,19 @@ export default function Bills() {
       gstAmount: bill.gstAmount.toString(),
       gstRate: bill.gstRate || 18,
       description: bill.description || '',
-      billType: bill.billType,
-      paymentMethod: bill.paymentMethod || '',
-      paymentReference: bill.paymentReference || '',
     })
     setEditingId(bill._id)
-    setIsAddOpen(true)
+    setSheetOpen(true)
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Are you sure you want to delete this bill?')) return
+    if (!confirm('Delete this bill?')) return
     try {
       await billsApi.delete(id)
       toast({ title: 'Bill deleted' })
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete bill',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to delete', variant: 'destructive' })
     }
   }
 
@@ -272,7 +192,6 @@ export default function Bills() {
       siteId: '',
       fundAllocationId: '',
       vendorName: '',
-      vendorGstNumber: '',
       invoiceNumber: '',
       billDate: new Date().toISOString().split('T')[0],
       totalAmount: '',
@@ -280,772 +199,381 @@ export default function Bills() {
       gstAmount: '',
       gstRate: 18,
       description: '',
-      billType: 'material',
-      paymentMethod: '',
-      paymentReference: '',
     })
     setEditingId(null)
   }
 
   const handleGstRateChange = (rate) => {
-    const totalAmount = parseFloat(form.totalAmount) || 0
-    const baseAmount = totalAmount / (1 + rate / 100)
-    const gstAmount = totalAmount - baseAmount
-    setForm({
-      ...form,
-      gstRate: rate,
-      baseAmount: baseAmount.toFixed(2),
-      gstAmount: gstAmount.toFixed(2)
-    })
+    const total = parseFloat(form.totalAmount) || 0
+    const base = total / (1 + rate / 100)
+    const gst = total - base
+    setForm({ ...form, gstRate: rate, baseAmount: base.toFixed(2), gstAmount: gst.toFixed(2) })
   }
 
   const handleTotalAmountChange = (value) => {
-    const totalAmount = parseFloat(value) || 0
-    const baseAmount = totalAmount / (1 + form.gstRate / 100)
-    const gstAmount = totalAmount - baseAmount
-    setForm({
-      ...form,
-      totalAmount: value,
-      baseAmount: baseAmount.toFixed(2),
-      gstAmount: gstAmount.toFixed(2)
-    })
+    const total = parseFloat(value) || 0
+    const base = total / (1 + form.gstRate / 100)
+    const gst = total - base
+    setForm({ ...form, totalAmount: value, baseAmount: base.toFixed(2), gstAmount: gst.toFixed(2) })
   }
 
   const handleReceiptUpload = async (billId, file) => {
+    setUploadingReceipt(billId)
     try {
-      setUploadingReceipt(billId)
       await billsApi.uploadReceipt(billId, file)
-      toast({ title: 'Receipt uploaded successfully' })
+      toast({ title: 'Receipt uploaded' })
       fetchData()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to upload receipt',
-        variant: 'destructive',
-      })
+    } catch {
+      toast({ title: 'Failed to upload receipt', variant: 'destructive' })
     } finally {
       setUploadingReceipt(null)
     }
   }
 
   const handleExport = async () => {
+    setExporting(true)
     try {
-      setExporting(true)
-      const params = Object.fromEntries(Object.entries(filters).filter(([_, v]) => v))
+      const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
       const response = await billsApi.exportCsv(params)
       const url = window.URL.createObjectURL(new Blob([response.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `bills-export-${new Date().toISOString().split('T')[0]}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
+      const a = document.createElement('a')
+      a.href = url
+      a.setAttribute('download', `bills-${new Date().toISOString().split('T')[0]}.csv`)
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
       window.URL.revokeObjectURL(url)
-      toast({ title: 'Bills exported successfully' })
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to export bills',
-        variant: 'destructive',
-      })
+      toast({ title: 'Exported' })
+    } catch {
+      toast({ title: 'Export failed', variant: 'destructive' })
     } finally {
       setExporting(false)
     }
   }
 
-  const handleVendorSelect = (vendor) => {
-    setForm({
-      ...form,
-      vendorName: vendor.name,
-      vendorGstNumber: vendor.gstNumber || '',
-    })
-  }
+  const filteredBills = bills.filter((b) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return b.vendorName?.toLowerCase().includes(q) || b.description?.toLowerCase().includes(q) || b.invoiceNumber?.toLowerCase().includes(q)
+  })
 
-  const clearFilters = () => {
-    setFilters({ siteId: '', status: '', billType: '' })
-    setPagination({ ...pagination, page: 1 })
-  }
+  const totalAmount = summary?.totals?.totalAmount || 0
+  const totalGst = summary?.totals?.totalGstAmount || 0
 
   return (
-    <div className="space-y-4 md:space-y-6 p-3 md:p-6">
-      <div className="flex justify-between items-center gap-3 md:gap-4">
-        <div>
-          <h1 className="text-xl md:text-3xl font-bold">GST / Government Bills</h1>
-          <p className="text-muted-foreground text-xs md:text-base">
-            Track and manage all bills with GST details
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          {bulkSelect.selectedCount > 0 && (
-            <Button
-              variant="destructive"
-              onClick={bulkSelect.deleteSelected}
-              disabled={bulkSelect.deleting}
-              className="w-full sm:w-auto"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              {bulkSelect.deleting ? 'Deleting...' : `Delete ${bulkSelect.selectedCount}`}
-            </Button>
-          )}
-          <Button variant="outline" onClick={handleExport} disabled={exporting} className="w-full sm:w-auto">
-            <Download className="h-4 w-4 mr-2" />
-            {exporting ? 'Exporting...' : 'Export CSV'}
+    <PageLayout>
+      <PageHeader title="GST Bills" subtitle={`${pagination.total} entries`}>
+        {bulkSelect.selectedCount > 0 && (
+          <Button size="sm" variant="destructive" onClick={bulkSelect.deleteSelected} disabled={bulkSelect.deleting}>
+            <Trash2 className="h-4 w-4 mr-1" />
+            Delete {bulkSelect.selectedCount}
           </Button>
-          <Button onClick={() => { resetForm(); setIsAddOpen(true); }} disabled={loadingStates.creating} className="w-full sm:w-auto">
-            <Plus className="h-4 w-4 mr-2" />
-            {loadingStates.creating ? 'Adding...' : 'Add Bill'}
-          </Button>
-        </div>
+        )}
+        <Button size="sm" variant="outline" onClick={handleExport} disabled={exporting}>
+          <Download className="h-4 w-4 mr-1" />
+          {exporting ? '...' : 'Export'}
+        </Button>
+        <Button size="sm" onClick={() => { resetForm(); setSheetOpen(true) }} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+          <Plus className="h-4 w-4 mr-1" />
+          Add Bill
+        </Button>
+      </PageHeader>
+
+      <SummaryBanner
+        color="indigo"
+        icon={<IndianRupee className="h-8 w-8" />}
+        items={[
+          { label: 'Total Amount', value: formatCurrency(totalAmount) },
+          { label: 'Total GST', value: formatCurrency(totalGst) },
+        ]}
+      />
+
+      <SearchFilterBar
+        search={search}
+        onSearch={setSearch}
+        placeholder="Search supplier, invoice no..."
+      >
+        <Select value={filters.status || 'all'} onValueChange={(v) => setFilters((f) => ({ ...f, status: v === 'all' ? '' : v }))}>
+          <SelectTrigger className="h-9 w-32 text-sm">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="credited">Credited</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
+          </SelectContent>
+        </Select>
+      </SearchFilterBar>
+
+      <div className="flex-1">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+          </div>
+        ) : filteredBills.length === 0 ? (
+          <EmptyState
+            message="No bills found"
+            action={
+              <Button variant="outline" size="sm" onClick={() => { resetForm(); setSheetOpen(true) }}>
+                <Plus className="h-4 w-4 mr-1" /> Add First Bill
+              </Button>
+            }
+          />
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filteredBills.map((bill) => (
+              <ListItem
+                key={bill._id}
+                avatar={(bill.vendorName || 'B').charAt(0)}
+                avatarColor="indigo"
+                title={bill.vendorName}
+                subtitle={
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-gray-400">{formatDate(bill.billDate)}</span>
+                    {bill.invoiceNumber && <span className="text-xs text-gray-400">• {bill.invoiceNumber}</span>}
+                    {bill.description && <span className="text-xs text-gray-400 truncate max-w-[120px]">• {bill.description}</span>}
+                    <span className="text-xs text-gray-400">• GST {formatCurrency(bill.gstAmount)}</span>
+                  </div>
+                }
+                amount={formatCurrency(bill.totalAmount)}
+                badge={{ label: bill.status, className: STATUS_COLORS[bill.status] || '' }}
+                selected={bulkSelect.isSelected(bill._id)}
+                onSelect={() => bulkSelect.toggleSelect(bill._id)}
+                actions={
+                  <>
+                    <ActionBtn onClick={() => setViewBill(bill)} title="View Details" icon={Eye} hoverClass="hover:text-indigo-600 hover:bg-indigo-50" />
+                    <label className="p-1.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer" title="Upload Receipt">
+                      <input type="file" className="hidden" accept="image/*,.pdf"
+                        onChange={(e) => e.target.files?.[0] && handleReceiptUpload(bill._id, e.target.files[0])}
+                        disabled={uploadingReceipt === bill._id} />
+                      {uploadingReceipt === bill._id
+                        ? <span className="text-[10px] text-gray-500">...</span>
+                        : <Upload className="h-4 w-4" />}
+                    </label>
+                    {isAdmin && bill.status === 'pending' && (
+                      <ActionBtn
+                        onClick={() => handleStatusUpdate(bill._id, 'credited')}
+                        title="Mark Credited"
+                        icon={Check}
+                        hoverClass="hover:text-blue-600 hover:bg-blue-50"
+                      />
+                    )}
+                    <ActionBtn onClick={() => handleEdit(bill)} title="Edit" icon={Edit} hoverClass="hover:text-indigo-600 hover:bg-indigo-50" />
+                    {isAdmin && (
+                      <ActionBtn
+                        onClick={() => handleDelete(bill._id)}
+                        title="Delete"
+                        icon={Trash2}
+                        hoverClass="hover:text-red-600 hover:bg-red-50"
+                      />
+                    )}
+                  </>
+                }
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Summary Cards */}
-      {summary && (
-        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-              <CardTitle className="text-xs md:text-sm font-medium">Total Bills</CardTitle>
-              <Receipt className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-              <div className="text-lg md:text-2xl font-bold">{formatCurrency(summary.totals.totalAmount)}</div>
-              <p className="text-[10px] md:text-xs text-muted-foreground">{summary.totals.count} bills</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-              <CardTitle className="text-xs md:text-sm font-medium">Total GST</CardTitle>
-              <FileText className="h-3 w-3 md:h-4 md:w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-              <div className="text-lg md:text-2xl font-bold">{formatCurrency(summary.totals.totalGstAmount)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-              <CardTitle className="text-xs md:text-sm font-medium">Pending</CardTitle>
-              <CreditCard className="h-3 w-3 md:h-4 md:w-4 text-yellow-500" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-              <div className="text-lg md:text-2xl font-bold text-yellow-600">
-                {formatCurrency(summary.statusSummary.find(s => s._id === 'pending')?.totalAmount || 0)}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 p-3 md:p-6">
-              <CardTitle className="text-xs md:text-sm font-medium">Credited</CardTitle>
-              <Check className="h-3 w-3 md:h-4 md:w-4 text-green-500" />
-            </CardHeader>
-            <CardContent className="p-3 pt-0 md:p-6 md:pt-0">
-              <div className="text-lg md:text-2xl font-bold text-green-600">
-                {formatCurrency(summary.statusSummary.find(s => s._id === 'credited')?.totalAmount || 0)}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <PagePagination
+        page={pagination.page}
+        pages={pagination.pages}
+        total={pagination.total}
+        onChange={(page) => setPagination((p) => ({ ...p, page }))}
+      />
 
-      {/* Filters */}
-      <Card>
-        <CardHeader className="pb-3 p-3 md:p-6">
-          <CardTitle className="text-sm md:text-base flex items-center gap-2">
-            <Filter className="h-3 w-3 md:h-4 md:w-4" />
-            Filters
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-3 md:p-6">
-          <div className="grid gap-3 md:gap-4 grid-cols-2 md:grid-cols-4">
-            <div className="space-y-2">
-              <Label className="text-xs md:text-sm">Site</Label>
-              <Select
-                value={filters.siteId}
-                onValueChange={(value) => {
-                  setFilters({ ...filters, siteId: value === 'all' ? '' : value })
-                  setPagination({ ...pagination, page: 1 })
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Sites" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sites</SelectItem>
-                  {sites.map((site) => (
-                    <SelectItem key={site._id} value={site._id}>{site.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs md:text-sm">Status</Label>
-              <Select
-                value={filters.status}
-                onValueChange={(value) => {
-                  setFilters({ ...filters, status: value === 'all' ? '' : value })
-                  setPagination({ ...pagination, page: 1 })
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="credited">Credited</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs md:text-sm">Type</Label>
-              <Select
-                value={filters.billType}
-                onValueChange={(value) => {
-                  setFilters({ ...filters, billType: value === 'all' ? '' : value })
-                  setPagination({ ...pagination, page: 1 })
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  {BILL_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2 col-span-2 md:col-span-1">
-              <Label className="hidden md:block">&nbsp;</Label>
-              <Button variant="outline" className="w-full text-xs md:text-sm" onClick={clearFilters}>
-                Clear Filters
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Bills Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Bills</CardTitle>
-          <CardDescription>Showing {bills.length} of {pagination.total} entries</CardDescription>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12">
-                <Checkbox
-                  checked={bulkSelect.isAllSelected()}
-                  onCheckedChange={bulkSelect.toggleSelectAll}
-                  aria-label="Select all"
-                />
-              </TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Vendor</TableHead>
-              <TableHead className="hidden md:table-cell">Invoice</TableHead>
-              <TableHead className="hidden sm:table-cell">Site</TableHead>
-              <TableHead className="hidden lg:table-cell">Type</TableHead>
-              <TableHead className="hidden lg:table-cell text-right">Base</TableHead>
-              <TableHead className="hidden lg:table-cell text-right">GST</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="hidden md:table-cell">Receipt</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={12} className="text-center py-8">
-                  <div className="flex justify-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : bills.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
-                  No bills found
-                </TableCell>
-              </TableRow>
-            ) : (
-              bills.map((bill) => (
-                <TableRow key={bill._id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={bulkSelect.isSelected(bill._id)}
-                      onCheckedChange={() => bulkSelect.toggleSelect(bill._id)}
-                      aria-label={`Select ${bill.vendorName}`}
-                    />
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">{formatDate(bill.billDate)}</TableCell>
-                  <TableCell className="min-w-[150px]">
-                    <div>
-                      <p className="font-medium">{bill.vendorName}</p>
-                      {bill.vendorGstNumber && (
-                        <p className="text-xs text-muted-foreground">GST: {bill.vendorGstNumber}</p>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">{bill.invoiceNumber || '-'}</TableCell>
-                  <TableCell className="hidden sm:table-cell">{bill.site?.name || '-'}</TableCell>
-                  <TableCell className="hidden lg:table-cell">
-                    <Badge variant="outline">
-                      {BILL_TYPES.find(t => t.value === bill.billType)?.label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-right">{formatCurrency(bill.baseAmount)}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-right">{formatCurrency(bill.gstAmount)}</TableCell>
-                  <TableCell className="text-right font-bold whitespace-nowrap">{formatCurrency(bill.totalAmount)}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-1">
-                      <Badge className={STATUS_COLORS[bill.status]}>{bill.status}</Badge>
-                      {bill.status === 'credited' && bill.fundAllocation && (
-                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                          <TrendingUp className="h-3 w-3 mr-1" />
-                          Investment Created
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {bill.receiptPath ? (
-                      <a
-                        href={bill.receiptPath}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline text-sm flex items-center gap-1"
-                      >
-                        <FileText className="h-3 w-3" />
-                        View
-                      </a>
-                    ) : (
-                      <label className="cursor-pointer">
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept="image/*,.pdf"
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              handleReceiptUpload(bill._id, e.target.files[0])
-                            }
-                          }}
-                          disabled={uploadingReceipt === bill._id}
-                        />
-                        <span className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                          {uploadingReceipt === bill._id ? (
-                            <span className="animate-spin">⏳</span>
-                          ) : (
-                            <Upload className="h-3 w-3" />
-                          )}
-                          Upload
-                        </span>
-                      </label>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => setViewBill(bill)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      {isAdmin && bill.status === 'pending' && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleStatusUpdate(bill._id, 'credited')}
-                          >
-                            Credit
-                          </Button>
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => handleStatusUpdate(bill._id, 'paid')}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            Mark Paid
-                          </Button>
-                        </>
-                      )}
-                      {isAdmin && bill.status === 'credited' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleStatusUpdate(bill._id, 'paid')}
-                        >
-                          Mark Paid
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(bill)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      {isAdmin && (
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(bill._id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+      {/* Add / Edit Sheet */}
+      <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
+        <SheetContent title={editingId ? 'Edit Bill' : 'Add New Bill'}>
+          <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+            {/* Vendor quick select */}
+            {vendorSuggestions.length > 0 && !editingId && (
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">Recent Suppliers</Label>
+                <Select onValueChange={(v) => setForm((f) => ({ ...f, vendorName: v }))}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Pick a previous supplier..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {vendorSuggestions.map((v) => (
+                      <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
-          </TableBody>
-        </Table>
-        </div>
-      </Card>
 
-      {/* Pagination */}
-      {pagination.pages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={pagination.page === 1}
-            onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm">Page {pagination.page} of {pagination.pages}</span>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={pagination.page === pagination.pages}
-            onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
+            {isAdmin && sites.length > 0 && (
+              <div className="space-y-1">
+                <Label>Site (Optional)</Label>
+                <Select
+                  value={form.siteId || 'none'}
+                  onValueChange={(v) => setForm({ ...form, siteId: v === 'none' ? '' : v })}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select site" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No specific site</SelectItem>
+                    {sites.map((s) => (
+                      <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-      {/* Add/Edit Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
-        <DialogContent className="max-w-lg">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle>{editingId ? 'Edit' : 'Add'} Bill</DialogTitle>
-              <DialogDescription>Record a bill with GST details</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
-              {vendorSuggestions.length > 0 && (
-                <div className="space-y-2">
-                  <Label>Quick Select Vendor</Label>
-                  <Select onValueChange={(value) => {
-                    const vendor = vendorSuggestions.find(v => v.name === value)
-                    if (vendor) handleVendorSelect(vendor)
-                  }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select from previous vendors..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {vendorSuggestions.map((vendor) => (
-                        <SelectItem key={vendor.name} value={vendor.name}>
-                          {vendor.name} {vendor.gstNumber && `(${vendor.gstNumber})`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Vendor Name *</Label>
-                  <Input
-                    value={form.vendorName}
-                    onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
-                    placeholder="ABC Suppliers"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Vendor GST Number</Label>
-                  <Input
-                    value={form.vendorGstNumber}
-                    onChange={(e) => setForm({ ...form, vendorGstNumber: e.target.value })}
-                    placeholder="29ABCDE1234F1Z5"
-                  />
-                </div>
+            <div className="space-y-1">
+              <Label>Supplier / Vendor Name *</Label>
+              <Input value={form.vendorName} onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
+                placeholder="e.g. ABC Steel Traders" required />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Invoice Number</Label>
+                <Input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })}
+                  placeholder="INV-001" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Invoice Number</Label>
-                  <Input
-                    value={form.invoiceNumber}
-                    onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })}
-                    placeholder="INV-001"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Bill Date *</Label>
-                  <Input
-                    type="date"
-                    value={form.billDate}
-                    onChange={(e) => setForm({ ...form, billDate: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Site</Label>
-                  <Select
-                    value={form.siteId}
-                    onValueChange={(value) => setForm({ ...form, siteId: value === 'none' ? '' : value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select site" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No specific site</SelectItem>
-                      {sites.map((site) => (
-                        <SelectItem key={site._id} value={site._id}>{site.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Bill Type</Label>
-                  <Select
-                    value={form.billType}
-                    onValueChange={(value) => setForm({ ...form, billType: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BILL_TYPES.map((type) => (
-                        <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <FundAllocationSelector
-                value={form.fundAllocationId}
-                onChange={(value) => setForm({ ...form, fundAllocationId: value })}
-                requestedAmount={parseFloat(form.totalAmount || 0)}
-                required={false}
-                label="Fund Allocation (Optional)"
-              />
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>Total Amount (Inc. GST) *</Label>
-                  <Input
-                    type="number"
-                    value={form.totalAmount}
-                    onChange={(e) => handleTotalAmountChange(e.target.value)}
-                    placeholder="11800"
-                    required
-                    min="0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>GST Rate</Label>
-                  <Select
-                    value={form.gstRate.toString()}
-                    onValueChange={(value) => handleGstRateChange(parseInt(value))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {GST_RATES.map((rate) => (
-                        <SelectItem key={rate.value} value={rate.value.toString()}>{rate.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Base Amount (Rs.)</Label>
-                  <Input
-                    type="number"
-                    value={form.baseAmount}
-                    readOnly
-                    placeholder="10000"
-                    className="bg-muted"
-                  />
-                </div>
-              </div>
-              {form.totalAmount && (
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Total Amount (Inc. GST)</p>
-                      <p className="text-lg font-bold text-blue-600">{formatCurrency(parseFloat(form.totalAmount || 0))}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Base Amount</p>
-                      <p className="text-lg font-semibold">{formatCurrency(parseFloat(form.baseAmount || 0))}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">GST ({form.gstRate}%)</p>
-                      <p className="text-lg font-semibold">{formatCurrency(parseFloat(form.gstAmount || 0))}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Steel rods - 2 tons"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Payment Method</Label>
-                  <Select
-                    value={form.paymentMethod}
-                    onValueChange={(value) => setForm({ ...form, paymentMethod: value === 'none' ? '' : value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select payment method" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Not specified</SelectItem>
-                      {PAYMENT_METHODS.map((method) => (
-                        <SelectItem key={method.value} value={method.value}>{method.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Payment Reference</Label>
-                  <Input
-                    value={form.paymentReference}
-                    onChange={(e) => setForm({ ...form, paymentReference: e.target.value })}
-                    placeholder="Cheque no. / UTR / Transaction ID"
-                  />
-                </div>
+              <div className="space-y-1">
+                <Label>Bill Date *</Label>
+                <Input type="date" value={form.billDate}
+                  onChange={(e) => setForm({ ...form, billDate: e.target.value })} required />
               </div>
             </div>
-            <DialogFooter>
-              <Button type="submit">{editingId ? 'Update' : 'Add'} Bill</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
-      {/* Bill Details View Dialog */}
-      <Dialog open={!!viewBill} onOpenChange={(open) => !open && setViewBill(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              Bill Details
-              <Button variant="ghost" size="icon" onClick={() => setViewBill(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Total Amount (with GST) *</Label>
+                <Input type="number" value={form.totalAmount}
+                  onChange={(e) => handleTotalAmountChange(e.target.value)}
+                  placeholder="11800" required min="0" />
+              </div>
+              <div className="space-y-1">
+                <Label>GST Rate</Label>
+                <Select value={form.gstRate.toString()} onValueChange={(v) => handleGstRateChange(parseInt(v))}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GST_RATES.map((r) => (
+                      <SelectItem key={r.value} value={r.value.toString()}>{r.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {form.totalAmount && (
+              <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-3 grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p className="text-xs text-gray-500">Base Amount</p>
+                  <p className="font-semibold">{formatCurrency(parseFloat(form.baseAmount || 0))}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">GST ({form.gstRate}%)</p>
+                  <p className="font-semibold">{formatCurrency(parseFloat(form.gstAmount || 0))}</p>
+                </div>
+              </div>
+            )}
+
+            <FundAllocationSelector
+              value={form.fundAllocationId}
+              onChange={(v) => setForm({ ...form, fundAllocationId: v })}
+              siteId={form.siteId || undefined}
+              requestedAmount={parseFloat(form.totalAmount || 0)}
+              required={false}
+              label="Link to Fund (Optional)"
+            />
+
+            <div className="space-y-1">
+              <Label>What is this bill for?</Label>
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="e.g. Steel rods - 2 tons for Block A" rows={2} />
+            </div>
+
+            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 h-11 text-base" disabled={loadingStates.creating}>
+              {loadingStates.creating ? 'Saving...' : editingId ? 'Update Bill' : 'Add Bill'}
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      {/* View Bill Sheet */}
+      <Sheet open={!!viewBill} onOpenChange={(open) => !open && setViewBill(null)}>
+        <SheetContent title="Bill Details">
           {viewBill && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Vendor</p>
-                  <p className="font-medium">{viewBill.vendorName}</p>
-                  {viewBill.vendorGstNumber && (
-                    <p className="text-xs text-muted-foreground">GST: {viewBill.vendorGstNumber}</p>
-                  )}
+            <div className="px-5 py-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center">
+                  <span className="text-indigo-600 text-lg font-bold">{viewBill.vendorName?.charAt(0)}</span>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Invoice Number</p>
-                  <p className="font-medium">{viewBill.invoiceNumber || '-'}</p>
+                  <p className="font-semibold text-gray-900">{viewBill.vendorName}</p>
+                  <p className="text-xs text-gray-400">{viewBill.invoiceNumber || 'No invoice no.'}</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Bill Date</p>
-                  <p className="font-medium">{formatDate(viewBill.billDate)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Site</p>
-                  <p className="font-medium">{viewBill.site?.name || '-'}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Base Amount</p>
-                  <p className="font-medium">{formatCurrency(viewBill.baseAmount)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">GST ({viewBill.gstRate || 18}%)</p>
-                  <p className="font-medium">{formatCurrency(viewBill.gstAmount)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Amount</p>
-                  <p className="font-bold text-lg">{formatCurrency(viewBill.totalAmount)}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <Badge className={STATUS_COLORS[viewBill.status]}>{viewBill.status}</Badge>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Type</p>
-                  <Badge variant="outline">
-                    {BILL_TYPES.find(t => t.value === viewBill.billType)?.label}
-                  </Badge>
-                </div>
-              </div>
-              {viewBill.paymentMethod && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Payment Method</p>
-                    <p className="font-medium">
-                      {PAYMENT_METHODS.find(m => m.value === viewBill.paymentMethod)?.label || viewBill.paymentMethod}
-                    </p>
-                  </div>
-                  {viewBill.paymentReference && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Payment Reference</p>
-                      <p className="font-medium">{viewBill.paymentReference}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-              {viewBill.description && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Description</p>
-                  <p className="font-medium">{viewBill.description}</p>
-                </div>
-              )}
-              {viewBill.receiptPath && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-2">Receipt</p>
-                  <a
-                    href={viewBill.receiptPath}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-blue-600 hover:underline"
-                  >
-                    <FileText className="h-4 w-4" />
-                    View Receipt Document
-                  </a>
-                </div>
-              )}
-              <div className="pt-4 border-t">
-                <p className="text-xs text-muted-foreground">
-                  Created by {viewBill.createdBy?.name || 'Unknown'} on {formatDate(viewBill.createdAt)}
+
+              <div className="rounded-xl bg-indigo-600 p-4 text-white">
+                <p className="text-xs text-indigo-200">Total Amount</p>
+                <p className="text-3xl font-bold">{formatCurrency(viewBill.totalAmount)}</p>
+                <p className="text-xs text-indigo-200 mt-1">
+                  Base {formatCurrency(viewBill.baseAmount)} + GST {formatCurrency(viewBill.gstAmount)} ({viewBill.gstRate || 18}%)
                 </p>
-                {viewBill.creditedDate && (
-                  <p className="text-xs text-muted-foreground">
-                    Credited on {formatDate(viewBill.creditedDate)}
-                  </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex justify-between items-center py-2 border-b">
+                  <span className="text-sm text-gray-500">Date</span>
+                  <span className="text-sm font-medium">{formatDate(viewBill.billDate)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b">
+                  <span className="text-sm text-gray-500">Status</span>
+                  <Badge className={`${STATUS_COLORS[viewBill.status] || ''}`}>{viewBill.status}</Badge>
+                </div>
+                {viewBill.fundAllocation && (
+                  <div className="flex justify-between items-center py-2 border-b">
+                    <span className="text-sm text-gray-500">Linked Fund</span>
+                    <span className="text-sm font-medium">{viewBill.fundAllocation.name || '-'}</span>
+                  </div>
                 )}
-                {viewBill.paidDate && (
-                  <p className="text-xs text-muted-foreground">
-                    Paid on {formatDate(viewBill.paidDate)}
-                  </p>
+                {viewBill.description && (
+                  <div className="py-2">
+                    <span className="text-sm text-gray-500">Description</span>
+                    <p className="text-sm font-medium mt-1">{viewBill.description}</p>
+                  </div>
                 )}
               </div>
+
+              {viewBill.receiptPath && (
+                <a href={viewBill.receiptPath} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-indigo-600 text-sm font-medium">
+                  <FileText className="h-4 w-4" /> View Receipt
+                </a>
+              )}
+
+              {isAdmin && viewBill.status === 'pending' && (
+                <div className="flex gap-2 pt-2">
+                  <Button className="flex-1 bg-blue-600 hover:bg-blue-700 h-11" size="sm"
+                    onClick={() => { handleStatusUpdate(viewBill._id, 'credited'); setViewBill(null) }}>
+                    Mark Credited
+                  </Button>
+                  <Button className="flex-1 bg-green-600 hover:bg-green-700 h-11" size="sm"
+                    onClick={() => { handleStatusUpdate(viewBill._id, 'paid'); setViewBill(null) }}>
+                    Mark Paid
+                  </Button>
+                </div>
+              )}
+
+              <p className="text-xs text-gray-400">
+                Added by {viewBill.createdBy?.name || 'Unknown'} · {formatDate(viewBill.createdAt)}
+              </p>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-    </div>
+        </SheetContent>
+      </Sheet>
+    </PageLayout>
   )
 }

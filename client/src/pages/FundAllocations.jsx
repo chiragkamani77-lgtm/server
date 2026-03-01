@@ -1,25 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { fundsApi, usersApi, sitesApi, investmentsApi } from '@/lib/api'
+import { fundsApi, usersApi, sitesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -30,9 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useToast } from '@/hooks/use-toast'
-import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, ArrowRight, ArrowDown, Wallet, TrendingUp, ChevronLeft, ChevronRight, Check, X, Eye, Receipt, Users, Building2, Edit, Trash2 } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,6 +30,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { useToast } from '@/hooks/use-toast'
+import { formatCurrency, formatDate } from '@/lib/utils'
+import { Plus, Wallet, Edit, Trash2, Check, X, Eye } from 'lucide-react'
+import {
+  PageLayout, PageHeader, SummaryBanner,
+  ListItem, ActionBtn, PagePagination, EmptyState,
+} from '@/components/page'
 
 const PURPOSES = [
   { value: 'site_expense', label: 'Site Expense' },
@@ -66,16 +60,14 @@ export default function FundAllocations() {
   const [allocations, setAllocations] = useState([])
   const [users, setUsers] = useState([])
   const [sites, setSites] = useState([])
-  const [summary, setSummary] = useState(null)
   const [flowSummary, setFlowSummary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
-  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [deleteId, setDeleteId] = useState(null)
   const [selectedAllocation, setSelectedAllocation] = useState(null)
   const [utilizationData, setUtilizationData] = useState(null)
-  const [investmentSummary, setInvestmentSummary] = useState(null)
   const [walletSummary, setWalletSummary] = useState(null)
   const [investmentPool, setInvestmentPool] = useState(null)
 
@@ -89,44 +81,30 @@ export default function FundAllocations() {
   })
 
   useEffect(() => {
-    if (user?._id) {
-      fetchData()
-    }
+    if (user?._id) fetchData()
   }, [pagination.page, user?._id])
 
   const fetchData = async () => {
     if (!user?._id) return
-
     try {
       setLoading(true)
-      const [allocationsRes, summaryRes, usersRes, sitesRes, flowRes, investmentRes, walletRes, poolRes] = await Promise.all([
+      const [allocationsRes, usersRes, sitesRes, flowRes, walletRes, poolRes] = await Promise.all([
         fundsApi.getAll({ page: pagination.page, limit: 20 }),
-        fundsApi.getMySummary(),
         usersApi.getAll(),
         sitesApi.getAll(),
         isAdmin ? fundsApi.getFlowSummary() : Promise.resolve({ data: null }),
-        isAdmin ? investmentsApi.getSummary() : Promise.resolve({ data: null }),
         fundsApi.getWalletSummary(),
         isAdmin ? fundsApi.getInvestmentPoolSummary() : Promise.resolve({ data: null }),
       ])
       setAllocations(allocationsRes.data?.allocations || [])
       setPagination(allocationsRes.data?.pagination || { page: 1, pages: 1, total: 0 })
-      setSummary(summaryRes.data)
-      // Developers can allocate to themselves (from investment pool)
-      // Engineers/Supervisors cannot allocate to themselves
-      setUsers((usersRes.data || []).filter(u => isAdmin ? true : u._id !== user?._id).filter(u=>  u.role !== 4))
+      setUsers((usersRes.data || []).filter(u => isAdmin ? true : u._id !== user?._id).filter(u => u.role !== 4))
       setSites(sitesRes.data || [])
       if (flowRes.data) setFlowSummary(flowRes.data)
-      if (investmentRes.data) setInvestmentSummary(investmentRes.data)
       if (walletRes.data) setWalletSummary(walletRes.data)
       if (poolRes.data) setInvestmentPool(poolRes.data)
     } catch (error) {
-      console.error('Fund allocations error:', error)
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to fetch fund allocations',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to fetch data', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -137,12 +115,8 @@ export default function FundAllocations() {
       const res = await fundsApi.getUtilization(allocationId)
       setUtilizationData(res.data)
       setSelectedAllocation(allocationId)
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch utilization data',
-        variant: 'destructive',
-      })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to fetch utilization data', variant: 'destructive' })
     }
   }
 
@@ -157,37 +131,26 @@ export default function FundAllocations() {
         description: form.description,
         referenceNumber: form.referenceNumber,
       }
-
       if (editingId) {
         await fundsApi.update(editingId, payload)
-        toast({ title: 'Fund allocation updated successfully' })
+        toast({ title: 'Allocation updated' })
       } else {
         await fundsApi.create(payload)
-        toast({ title: 'Fund allocation created successfully' })
+        toast({ title: 'Funds allocated successfully' })
       }
-
-      setIsAddOpen(false)
+      setSheetOpen(false)
       resetForm()
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || `Failed to ${editingId ? 'update' : 'create'} allocation`,
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to save', variant: 'destructive' })
     }
   }
 
   const handleEdit = (allocation) => {
     if (!isAllocationEditable(allocation)) {
-      toast({
-        title: 'Cannot Edit',
-        description: 'This allocation cannot be edited in its current status.',
-        variant: 'destructive',
-      })
+      toast({ title: 'Cannot edit this allocation', variant: 'destructive' })
       return
     }
-
     setForm({
       toUserId: allocation.toUser?._id || '',
       siteId: allocation.site?._id || '',
@@ -197,23 +160,18 @@ export default function FundAllocations() {
       referenceNumber: allocation.referenceNumber || '',
     })
     setEditingId(allocation._id)
-    setIsAddOpen(true)
+    setSheetOpen(true)
   }
 
   const handleDelete = async () => {
     if (!deleteId) return
-
     try {
       await fundsApi.delete(deleteId)
-      toast({ title: 'Fund allocation deleted successfully' })
+      toast({ title: 'Allocation deleted' })
       setDeleteId(null)
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete allocation',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to delete', variant: 'destructive' })
     }
   }
 
@@ -223,700 +181,381 @@ export default function FundAllocations() {
       toast({ title: `Allocation ${status}` })
       fetchData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to update status',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to update status', variant: 'destructive' })
     }
   }
 
   const resetForm = () => {
-    setForm({
-      toUserId: '',
-      siteId: '',
-      amount: '',
-      purpose: 'site_expense',
-      description: '',
-      referenceNumber: '',
-    })
+    setForm({ toUserId: '', siteId: '', amount: '', purpose: 'site_expense', description: '', referenceNumber: '' })
     setEditingId(null)
   }
 
-  // Business rule: Determine if allocation can be edited
   const isAllocationEditable = (allocation) => {
-    // Developers can edit any allocation
     if (isAdmin) return true
-    // Supervisors can only edit pending and approved
-    if (isSupervisor) {
-      return allocation.status === 'pending' || allocation.status === 'approved'
-    }
+    if (isSupervisor) return allocation.status === 'pending' || allocation.status === 'approved'
     return false
   }
 
-  // Business rule: Determine if allocation can be deleted
   const isAllocationDeletable = (allocation) => {
-    // Developers can delete any allocation
     if (isAdmin) return true
-    // Supervisors can only delete pending allocations
-    if (isSupervisor) {
-      return allocation.status === 'pending'
-    }
+    if (isSupervisor) return allocation.status === 'pending'
     return false
   }
 
-  // Determine which fields can be edited based on status
   const getEditableFields = (status) => {
-    if (status === 'pending') {
-      return { toUser: true, site: true, amount: true, purpose: true, description: true, reference: true }
-    } else if (status === 'approved') {
-      // Limited edit - only non-financial fields
-      return { toUser: false, site: true, amount: false, purpose: false, description: true, reference: true }
-    }
-    return { toUser: false, site: false, amount: false, purpose: false, description: false, reference: false }
+    if (status === 'pending') return { toUser: true, site: true, amount: true, purpose: true }
+    if (status === 'approved') return { toUser: false, site: true, amount: false, purpose: false }
+    return { toUser: false, site: false, amount: false, purpose: false }
   }
+
+  const currentEditStatus = editingId ? (allocations.find(a => a._id === editingId)?.status || '') : ''
+  const editableFields = getEditableFields(currentEditStatus)
+
+  const summaryItems = walletSummary
+    ? [
+        {
+          label: isAdmin ? 'Investment Pool' : 'Total Received',
+          value: isAdmin && investmentPool
+            ? formatCurrency(investmentPool.totalInvestment || 0)
+            : formatCurrency(walletSummary.totalReceived || 0),
+        },
+        { label: 'Total Spent', value: formatCurrency(walletSummary.totalSpent || 0) },
+        { label: 'Remaining', value: formatCurrency(walletSummary.remainingBalance || 0) },
+      ]
+    : [{ label: 'Loading...', value: '—' }]
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Fund Allocations</h1>
-          <p className="text-muted-foreground text-sm md:text-base">
-            Track fund flow from developers to engineers and supervisors
-          </p>
-        </div>
+    <PageLayout>
+      <PageHeader title="Fund Allocations" subtitle={`${pagination.total} entries`}>
         {(isAdmin || isSupervisor) && (
-          <Button onClick={() => { resetForm(); setIsAddOpen(true); }} className="w-full sm:w-auto">
-            <Plus className="h-4 w-4 mr-2" />
-            Allocate Funds
+          <Button size="sm" onClick={() => { resetForm(); setSheetOpen(true) }} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Plus className="h-4 w-4 mr-1" />
+            Allocate
           </Button>
+        )}
+      </PageHeader>
+
+      <SummaryBanner
+        color="blue"
+        icon={<Wallet className="h-8 w-8" />}
+        items={summaryItems}
+      />
+
+      {/* Utilization breakdown mini cards */}
+      {walletSummary?.breakdown && (
+        <div className="px-4 pb-2 grid grid-cols-3 gap-2">
+          <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
+            <p className="text-[10px] text-orange-600 font-semibold uppercase tracking-wide">Expenses</p>
+            <p className="text-sm font-bold text-orange-700 mt-0.5">{formatCurrency(walletSummary.breakdown.expenses?.total || 0)}</p>
+            <p className="text-[10px] text-gray-400">{walletSummary.breakdown.expenses?.count || 0} entries</p>
+          </div>
+          <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+            <p className="text-[10px] text-blue-600 font-semibold uppercase tracking-wide">GST Bills</p>
+            <p className="text-sm font-bold text-blue-700 mt-0.5">{formatCurrency(walletSummary.breakdown.bills?.total || 0)}</p>
+            <p className="text-[10px] text-gray-400">{walletSummary.breakdown.bills?.count || 0} bills</p>
+          </div>
+          <div className="p-3 bg-purple-50 rounded-xl border border-purple-100">
+            <p className="text-[10px] text-purple-600 font-semibold uppercase tracking-wide">Labour</p>
+            <p className="text-sm font-bold text-purple-700 mt-0.5">{formatCurrency(walletSummary.breakdown.ledger?.net || 0)}</p>
+            <p className="text-[10px] text-gray-400">Paid out</p>
+          </div>
+        </div>
+      )}
+
+      {/* Fund Flow Overview (Admin only) */}
+      {isAdmin && flowSummary && (
+        <div className="px-4 pb-2">
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Fund Flow Overview</p>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="text-center p-2 bg-blue-50 rounded-lg">
+                <p className="text-[10px] text-blue-500 mb-1">Dev → Engineer</p>
+                <p className="text-sm font-bold text-blue-700">{formatCurrency(flowSummary.fundFlow?.developerToEngineer?.total || 0)}</p>
+              </div>
+              <div className="text-center p-2 bg-purple-50 rounded-lg">
+                <p className="text-[10px] text-purple-500 mb-1">Eng → Supervisor</p>
+                <p className="text-sm font-bold text-purple-700">{formatCurrency(flowSummary.fundFlow?.engineerToSupervisor?.total || 0)}</p>
+              </div>
+              <div className="text-center p-2 bg-green-50 rounded-lg">
+                <p className="text-[10px] text-green-500 mb-1">Dev → Supervisor</p>
+                <p className="text-sm font-bold text-green-700">{formatCurrency(flowSummary.fundFlow?.developerToSupervisor?.total || 0)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Allocations list */}
+      <div className="flex-1">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        ) : allocations.length === 0 ? (
+          <EmptyState
+            message="No fund allocations yet"
+            action={(isAdmin || isSupervisor) && (
+              <Button variant="outline" size="sm" onClick={() => { resetForm(); setSheetOpen(true) }}>
+                <Plus className="h-4 w-4 mr-1" /> Allocate Funds
+              </Button>
+            )}
+            icon={<Wallet className="h-12 w-12" />}
+          />
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {allocations.map((allocation) => (
+              <ListItem
+                key={allocation._id}
+                avatar={allocation.fromUser?.name}
+                avatarColor="blue"
+                title={`${allocation.fromUser?.name || '—'} → ${allocation.toUser?.name || '—'}`}
+                subtitle={
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-gray-400">{formatDate(allocation.allocationDate)}</span>
+                    {allocation.site?.name && <span className="text-xs text-gray-400">• {allocation.site.name}</span>}
+                    <span className="text-xs text-gray-400">
+                      • {PURPOSES.find(p => p.value === allocation.purpose)?.label || allocation.purpose}
+                    </span>
+                    {allocation.referenceNumber && (
+                      <span className="text-xs text-gray-400">• Ref: {allocation.referenceNumber}</span>
+                    )}
+                  </div>
+                }
+                amount={formatCurrency(allocation.amount)}
+                badge={{ label: allocation.status, className: STATUS_COLORS[allocation.status] || '' }}
+                actions={
+                  <>
+                    {allocation.status === 'disbursed' && (
+                      <ActionBtn
+                        onClick={() => fetchUtilization(allocation._id)}
+                        title="View Usage"
+                        icon={Eye}
+                        hoverClass="hover:text-blue-600 hover:bg-blue-50"
+                      />
+                    )}
+                    {isAdmin && allocation.status === 'pending' && (
+                      <>
+                        <ActionBtn
+                          onClick={() => handleStatusUpdate(allocation._id, 'approved')}
+                          title="Approve"
+                          icon={Check}
+                          hoverClass="hover:text-green-600 hover:bg-green-50"
+                        />
+                        <ActionBtn
+                          onClick={() => handleStatusUpdate(allocation._id, 'rejected')}
+                          title="Reject"
+                          icon={X}
+                          hoverClass="hover:text-red-600 hover:bg-red-50"
+                        />
+                      </>
+                    )}
+                    {allocation.toUser?._id === user._id && allocation.status === 'approved' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs px-2"
+                        onClick={() => handleStatusUpdate(allocation._id, 'disbursed')}
+                      >
+                        Mark Received
+                      </Button>
+                    )}
+                    {(isAdmin || isSupervisor) && isAllocationEditable(allocation) && (
+                      <ActionBtn onClick={() => handleEdit(allocation)} title="Edit" icon={Edit} />
+                    )}
+                    {(isAdmin || isSupervisor) && isAllocationDeletable(allocation) && (
+                      <ActionBtn
+                        onClick={() => setDeleteId(allocation._id)}
+                        title="Delete"
+                        icon={Trash2}
+                        hoverClass="hover:text-red-600 hover:bg-red-50"
+                      />
+                    )}
+                  </>
+                }
+              />
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Wallet Summary Cards - Investment-style Layout */}
-      {walletSummary && (
-        <>
-          {/* Top Summary Cards */}
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  {isAdmin ? 'Investment Pool' : 'Wallet - Total Received'}
-                </CardTitle>
-                <Wallet className="h-4 w-4 text-green-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {isAdmin && investmentPool
-                    ? formatCurrency(investmentPool.totalInvestment || 0)
-                    : formatCurrency(walletSummary.totalReceived || 0)}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {isAdmin && investmentPool
-                    ? `Available: ${formatCurrency(investmentPool.availablePool || 0)}`
-                    : `${walletSummary.receivedCount || 0} allocations received`}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Spent</CardTitle>
-                <TrendingUp className="h-4 w-4 text-blue-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-blue-600">
-                  {formatCurrency(walletSummary.totalSpent || 0)}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Expenses + Bills + Salaries
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Remaining Balance</CardTitle>
-                <Wallet className="h-4 w-4 text-purple-500" />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold ${walletSummary.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatCurrency(walletSummary.remainingBalance || 0)}
-                </div>
-                <p className="text-xs text-muted-foreground">Available in wallet</p>
-              </CardContent>
-            </Card>
-          </div>
+      <PagePagination
+        page={pagination.page}
+        pages={pagination.pages}
+        total={pagination.total}
+        onChange={(page) => setPagination((p) => ({ ...p, page }))}
+      />
 
-          {/* Fund Utilization Breakdown */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Receipt className="h-5 w-5" />
-                Fund Utilization Breakdown
-              </CardTitle>
-              <CardDescription>How your wallet funds have been utilized</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
-                {/* Site Expenses */}
-                <div className="p-4 border rounded-lg bg-orange-50 dark:bg-orange-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Building2 className="h-5 w-5 text-orange-500" />
-                    <span className="font-medium text-sm">Site Expenses</span>
-                  </div>
-                  <div className="text-2xl font-bold text-orange-600">
-                    {formatCurrency(walletSummary.breakdown?.expenses?.total || 0)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {walletSummary.breakdown?.expenses?.count || 0} transactions
-                  </p>
-                </div>
-
-                {/* Material & GST Bills */}
-                <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Receipt className="h-5 w-5 text-blue-500" />
-                    <span className="font-medium text-sm">Material & GST Bills</span>
-                  </div>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {formatCurrency(walletSummary.breakdown?.bills?.total || 0)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {walletSummary.breakdown?.bills?.count || 0} bills
-                  </p>
-                </div>
-
-                {/* Labor & Salaries */}
-                <div className="p-4 border rounded-lg bg-purple-50 dark:bg-purple-950">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Users className="h-5 w-5 text-purple-500" />
-                    <span className="font-medium text-sm">Labor & Salaries</span>
-                  </div>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {formatCurrency(walletSummary.breakdown?.ledger?.net || 0)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Credits: {formatCurrency(walletSummary.breakdown?.ledger?.credits || 0)} |
-                    Debits: {formatCurrency(walletSummary.breakdown?.ledger?.debits || 0)}
-                  </p>
-                </div>
+      {/* Add/Edit Sheet */}
+      <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
+        <SheetContent title={editingId ? 'Edit Allocation' : 'Allocate Funds'}>
+          <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+            {editingId && currentEditStatus === 'approved' && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+                <strong>Limited Edit:</strong> Amount and recipient cannot be changed for an approved allocation.
               </div>
+            )}
 
-              {/* Summary Bar */}
-              <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-2">
-                  <div className="text-center sm:text-left">
-                    <p className="text-sm text-muted-foreground">Total Received</p>
-                    <p className="text-xl font-bold text-green-600">
-                      {formatCurrency(walletSummary.totalReceived || 0)}
-                    </p>
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-muted-foreground hidden sm:block" />
-                  <div className="text-center sm:text-left">
-                    <p className="text-sm text-muted-foreground">Total Spent</p>
-                    <p className="text-xl font-bold text-blue-600">
-                      {formatCurrency(walletSummary.totalSpent || 0)}
-                    </p>
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-muted-foreground hidden sm:block" />
-                  <div className="text-center sm:text-left">
-                    <p className="text-sm text-muted-foreground">Remaining</p>
-                    <p className={`text-xl font-bold ${walletSummary.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {formatCurrency(walletSummary.remainingBalance || 0)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {/* Fund Flow Summary (Admin Only) */}
-      {isAdmin && flowSummary && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ArrowDown className="h-5 w-5" />
-              Fund Flow Overview
-            </CardTitle>
-            <CardDescription>How funds flow through the organization</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-3 mb-6">
-              {/* Developer to Engineer */}
-              <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
-                <div className="flex items-center gap-2 mb-2">
-                  <Building2 className="h-5 w-5 text-blue-500" />
-                  <span className="font-medium text-sm">Developer → Engineer</span>
-                </div>
-                <div className="text-2xl font-bold text-blue-600">
-                  {formatCurrency(flowSummary.fundFlow?.developerToEngineer?.total || 0)}
-                </div>
-                {(flowSummary.fundFlow?.developerToEngineer?.recipients || []).map((r) => (
-                  <div key={r.toUser?._id} className="flex justify-between text-xs mt-1 text-muted-foreground">
-                    <span>{r.toUser?.name}</span>
-                    <span>{formatCurrency(r.total)}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Engineer to Supervisor */}
-              <div className="p-4 border rounded-lg bg-purple-50 dark:bg-purple-950">
-                <div className="flex items-center gap-2 mb-2">
-                  <Users className="h-5 w-5 text-purple-500" />
-                  <span className="font-medium text-sm">Engineer → Supervisor</span>
-                </div>
-                <div className="text-2xl font-bold text-purple-600">
-                  {formatCurrency(flowSummary.fundFlow?.engineerToSupervisor?.total || 0)}
-                </div>
-                {(flowSummary.fundFlow?.engineerToSupervisor?.recipients || []).map((r) => (
-                  <div key={r.toUser?._id} className="flex justify-between text-xs mt-1 text-muted-foreground">
-                    <span>{r.toUser?.name}</span>
-                    <span>{formatCurrency(r.total)}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Developer to Supervisor */}
-              <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-950">
-                <div className="flex items-center gap-2 mb-2">
-                  <ArrowRight className="h-5 w-5 text-green-500" />
-                  <span className="font-medium text-sm">Developer → Supervisor</span>
-                </div>
-                <div className="text-2xl font-bold text-green-600">
-                  {formatCurrency(flowSummary.fundFlow?.developerToSupervisor?.total || 0)}
-                </div>
-                {(flowSummary.fundFlow?.developerToSupervisor?.recipients || []).map((r) => (
-                  <div key={r.toUser?._id} className="flex justify-between text-xs mt-1 text-muted-foreground">
-                    <span>{r.toUser?.name}</span>
-                    <span>{formatCurrency(r.total)}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-1">
+              <Label>Send Money To *</Label>
+              <Select
+                value={form.toUserId}
+                onValueChange={(v) => setForm({ ...form, toUserId: v })}
+                required
+                disabled={!!editingId && !editableFields.toUser}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose team member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {users.map((u) => (
+                    <SelectItem key={u._id} value={u._id}>
+                      {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : 'Supervisor'})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            {/* Utilization Breakdown */}
-            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-              <h4 className="font-medium mb-3">Fund Utilization Summary</h4>
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="flex justify-between items-center p-2 border rounded">
-                  <span className="text-sm flex items-center gap-2">
-                    <Building2 className="h-4 w-4 text-orange-500" />
-                    Expenses
-                  </span>
-                  <span className="font-medium">{formatCurrency(flowSummary.utilization?.expenses?.total || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 border rounded">
-                  <span className="text-sm flex items-center gap-2">
-                    <Receipt className="h-4 w-4 text-blue-500" />
-                    Bills
-                  </span>
-                  <span className="font-medium">{formatCurrency(flowSummary.utilization?.bills?.total || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 border rounded">
-                  <span className="text-sm flex items-center gap-2">
-                    <Users className="h-4 w-4 text-purple-500" />
-                    Worker Ledger
-                  </span>
-                  <span className="font-medium">{formatCurrency(flowSummary.utilization?.workerLedger?.net || 0)}</span>
-                </div>
-              </div>
-              <div className="mt-4 pt-4 border-t flex justify-between items-center">
-                <span className="font-medium">Total Disbursed vs Utilized</span>
-                <div className="text-right">
-                  <span className="text-green-600 font-bold">{formatCurrency(flowSummary.totalDisbursed || 0)}</span>
-                  <span className="mx-2 text-muted-foreground">/</span>
-                  <span className="text-blue-600 font-bold">{formatCurrency(flowSummary.totalUtilized || 0)}</span>
-                </div>
-              </div>
+            <div className="space-y-1">
+              <Label>Site (Optional)</Label>
+              <Select
+                value={form.siteId || 'none'}
+                onValueChange={(v) => setForm({ ...form, siteId: v === 'none' ? '' : v })}
+                disabled={!!editingId && !editableFields.site}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select site" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific site</SelectItem>
+                  {sites.map((site) => (
+                    <SelectItem key={site._id} value={site._id}>{site.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </CardContent>
-        </Card>
-      )}
+
+            <div className="space-y-1">
+              <Label>Amount (₹) *</Label>
+              <Input
+                type="number"
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                placeholder="e.g. 50000"
+                required
+                min="0"
+                disabled={!!editingId && !editableFields.amount}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Purpose</Label>
+              <Select
+                value={form.purpose}
+                onValueChange={(v) => setForm({ ...form, purpose: v })}
+                disabled={!!editingId && !editableFields.purpose}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PURPOSES.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Description / Note</Label>
+              <Textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="e.g. For cement and steel purchase"
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Reference / Transaction No.</Label>
+              <Input
+                value={form.referenceNumber}
+                onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
+                placeholder="e.g. TXN123456"
+              />
+            </div>
+
+            <Button type="submit" className="w-full h-11 text-base bg-blue-600 hover:bg-blue-700">
+              {editingId ? 'Save Changes' : 'Send Funds'}
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
 
       {/* Utilization Detail Dialog */}
-      {selectedAllocation && utilizationData && (
-        <Dialog open={!!selectedAllocation} onOpenChange={() => { setSelectedAllocation(null); setUtilizationData(null); }}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Fund Utilization Details</DialogTitle>
-              <DialogDescription>
-                How this allocation of {formatCurrency(utilizationData.allocation?.amount)} has been utilized
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              {/* Summary */}
-              <div className="grid gap-2 md:grid-cols-4 text-center">
-                <div className="p-2 border rounded">
-                  <p className="text-xs text-muted-foreground">Allocated</p>
-                  <p className="font-bold text-green-600">{formatCurrency(utilizationData.summary?.allocated || 0)}</p>
-                </div>
-                <div className="p-2 border rounded">
-                  <p className="text-xs text-muted-foreground">Utilized</p>
-                  <p className="font-bold text-blue-600">{formatCurrency(utilizationData.summary?.totalUtilized || 0)}</p>
-                </div>
-                <div className="p-2 border rounded">
-                  <p className="text-xs text-muted-foreground">Remaining</p>
-                  <p className={`font-bold ${utilizationData.summary?.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatCurrency(utilizationData.summary?.remainingBalance || 0)}
-                  </p>
-                </div>
-                <div className="p-2 border rounded">
-                  <p className="text-xs text-muted-foreground">Utilization</p>
-                  <p className="font-bold">{utilizationData.summary?.utilizationPercent}%</p>
-                </div>
+      <Dialog
+        open={!!selectedAllocation}
+        onOpenChange={() => { setSelectedAllocation(null); setUtilizationData(null) }}
+      >
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Fund Usage Details</DialogTitle>
+            <DialogDescription>
+              {utilizationData && `How ${formatCurrency(utilizationData.allocation?.amount)} was used`}
+            </DialogDescription>
+          </DialogHeader>
+          {utilizationData && (
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-4 gap-2 text-center">
+                {[
+                  { label: 'Allocated', value: formatCurrency(utilizationData.summary?.allocated || 0), color: 'text-green-600' },
+                  { label: 'Used', value: formatCurrency(utilizationData.summary?.totalUtilized || 0), color: 'text-blue-600' },
+                  {
+                    label: 'Remaining',
+                    value: formatCurrency(utilizationData.summary?.remainingBalance || 0),
+                    color: utilizationData.summary?.remainingBalance >= 0 ? 'text-green-600' : 'text-red-600',
+                  },
+                  { label: 'Used %', value: `${utilizationData.summary?.utilizationPercent}%`, color: 'text-gray-700' },
+                ].map((item) => (
+                  <div key={item.label} className="p-2 border rounded-lg">
+                    <p className="text-[10px] text-gray-400">{item.label}</p>
+                    <p className={`text-sm font-bold ${item.color}`}>{item.value}</p>
+                  </div>
+                ))}
               </div>
-
-              {/* Breakdown */}
-              <div className="space-y-3">
-                <div className="flex justify-between items-center p-2 bg-orange-50 rounded">
-                  <span>Expenses ({utilizationData.utilization?.expenses?.count || 0})</span>
-                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.expenses?.total || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 bg-blue-50 rounded">
-                  <span>Bills ({utilizationData.utilization?.bills?.count || 0})</span>
-                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.bills?.total || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 bg-purple-50 rounded">
-                  <span>Worker Ledger ({utilizationData.utilization?.workerLedger?.count || 0})</span>
-                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.workerLedger?.net || 0)}</span>
-                </div>
-                <div className="flex justify-between items-center p-2 bg-green-50 rounded">
-                  <span>Sub-Allocations ({utilizationData.utilization?.subAllocations?.count || 0})</span>
-                  <span className="font-medium">{formatCurrency(utilizationData.utilization?.subAllocations?.total || 0)}</span>
-                </div>
+              <div className="space-y-2">
+                {[
+                  { label: 'Expenses', count: utilizationData.utilization?.expenses?.count, total: utilizationData.utilization?.expenses?.total, bg: 'bg-orange-50' },
+                  { label: 'GST Bills', count: utilizationData.utilization?.bills?.count, total: utilizationData.utilization?.bills?.total, bg: 'bg-blue-50' },
+                  { label: 'Worker Ledger', count: utilizationData.utilization?.workerLedger?.count, total: utilizationData.utilization?.workerLedger?.net, bg: 'bg-purple-50' },
+                  { label: 'Sub-Allocations', count: utilizationData.utilization?.subAllocations?.count, total: utilizationData.utilization?.subAllocations?.total, bg: 'bg-green-50' },
+                ].map((row) => (
+                  <div key={row.label} className={`flex justify-between items-center p-3 rounded-lg ${row.bg}`}>
+                    <span className="text-sm">{row.label} ({row.count || 0})</span>
+                    <span className="font-semibold">{formatCurrency(row.total || 0)}</span>
+                  </div>
+                ))}
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Allocations Table */}
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>Fund Allocation History</CardTitle>
-          <CardDescription>Showing {allocations.length} of {pagination.total} entries</CardDescription>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>From</TableHead>
-              <TableHead></TableHead>
-              <TableHead>To</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead>Purpose</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-8">
-                  <div className="flex justify-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : allocations.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                  No fund allocations found
-                </TableCell>
-              </TableRow>
-            ) : (
-              allocations.map((allocation) => (
-                <TableRow key={allocation._id}>
-                  <TableCell>{formatDate(allocation.allocationDate)}</TableCell>
-                  <TableCell className="font-medium">{allocation.fromUser?.name}</TableCell>
-                  <TableCell><ArrowRight className="h-4 w-4 text-muted-foreground" /></TableCell>
-                  <TableCell className="font-medium">{allocation.toUser?.name}</TableCell>
-                  <TableCell>{allocation.site?.name || '-'}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {PURPOSES.find(p => p.value === allocation.purpose)?.label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={STATUS_COLORS[allocation.status]}>
-                      {allocation.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-bold">{formatCurrency(allocation.amount)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1 flex-wrap">
-                      {allocation.status === 'disbursed' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => fetchUtilization(allocation._id)}
-                          title="View Utilization"
-                        >
-                          <Eye className="h-4 w-4 text-blue-500" />
-                        </Button>
-                      )}
-                      {isAdmin && allocation.status === 'pending' && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleStatusUpdate(allocation._id, 'approved')}
-                            title="Approve"
-                          >
-                            <Check className="h-4 w-4 text-green-500" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleStatusUpdate(allocation._id, 'rejected')}
-                            title="Reject"
-                          >
-                            <X className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </>
-                      )}
-                      {allocation.toUser?._id === user._id && allocation.status === 'approved' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleStatusUpdate(allocation._id, 'disbursed')}
-                        >
-                          Mark Received
-                        </Button>
-                      )}
-                      {(isAdmin || isSupervisor) && isAllocationEditable(allocation) && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(allocation)}
-                          title="Edit Allocation"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      )}
-                      {(isAdmin || isSupervisor) && isAllocationDeletable(allocation) && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteId(allocation._id)}
-                          title="Delete Allocation"
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-        </div>
-      </Card>
-
-      {/* Pagination */}
-      {pagination.pages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={pagination.page === 1}
-            onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm">Page {pagination.page} of {pagination.pages}</span>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={pagination.page === pagination.pages}
-            onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-
-      {/* Add/Edit Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle>{editingId ? 'Edit Fund Allocation' : 'Allocate Funds'}</DialogTitle>
-              <DialogDescription>
-                {editingId
-                  ? 'Update fund allocation details. Some fields may be locked based on allocation status.'
-                  : 'Transfer funds to a team member for site expenses'
-                }
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              {editingId && (() => {
-                const currentAllocation = allocations.find(a => a._id === editingId)
-                const editableFields = currentAllocation ? getEditableFields(currentAllocation.status) : {}
-                const hasLimitedEdit = currentAllocation?.status === 'approved'
-
-                return hasLimitedEdit && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                    <p className="text-sm text-yellow-800">
-                      <strong>Limited Edit Mode:</strong> This allocation is approved. You can only edit description, reference, and site. Amount and recipient cannot be changed.
-                    </p>
-                  </div>
-                )
-              })()}
-
-              <div className="space-y-2">
-                <Label>Recipient</Label>
-                <Select
-                  value={form.toUserId}
-                  onValueChange={(value) => setForm({ ...form, toUserId: value })}
-                  required
-                  disabled={editingId && !(() => {
-                    const currentAllocation = allocations.find(a => a._id === editingId)
-                    return currentAllocation ? getEditableFields(currentAllocation.status).toUser : false
-                  })()}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select recipient" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users.length === 0 ? (
-                      <div className="p-2 text-sm text-muted-foreground">
-                        No team members available. {!isAdmin && 'Please create team members first.'}
-                      </div>
-                    ) : (
-                      users.map((u) => (
-                        <SelectItem key={u._id} value={u._id}>
-                          {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : u.role === 3 ? 'Supervisor' : 'Worker'})
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-                {!isAdmin && users.length === 0 && (
-                  <p className="text-sm text-yellow-600 mt-1">
-                    You need to create team members (supervisors/workers) before allocating funds. Go to Users page to add team members.
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label>Site (Optional)</Label>
-                <Select
-                  value={form.siteId}
-                  onValueChange={(value) => setForm({ ...form, siteId: value === 'none' ? '' : value })}
-                  disabled={editingId && !(() => {
-                    const currentAllocation = allocations.find(a => a._id === editingId)
-                    return currentAllocation ? getEditableFields(currentAllocation.status).site : false
-                  })()}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select site" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.length === 0 && !isAdmin ? (
-                      <div className="p-2 text-sm text-muted-foreground">
-                        No sites assigned. Contact admin to assign sites.
-                      </div>
-                    ) : (
-                      sites.map((site) => (
-                        <SelectItem key={site._id} value={site._id}>
-                          {site.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-                {!isAdmin && sites.length === 0 && (
-                  <p className="text-sm text-blue-600 mt-1">
-                    You don't have access to any sites yet. Ask a developer to assign you to sites.
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label>Amount (Rs.)</Label>
-                <Input
-                  type="number"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  placeholder="50000"
-                  required
-                  min="0"
-                  disabled={editingId && !(() => {
-                    const currentAllocation = allocations.find(a => a._id === editingId)
-                    return currentAllocation ? getEditableFields(currentAllocation.status).amount : false
-                  })()}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Purpose</Label>
-                <Select
-                  value={form.purpose}
-                  onValueChange={(value) => setForm({ ...form, purpose: value })}
-                  disabled={editingId && !(() => {
-                    const currentAllocation = allocations.find(a => a._id === editingId)
-                    return currentAllocation ? getEditableFields(currentAllocation.status).purpose : false
-                  })()}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PURPOSES.map((purpose) => (
-                      <SelectItem key={purpose.value} value={purpose.value}>
-                        {purpose.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="For cement and steel purchase"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Reference Number</Label>
-                <Input
-                  value={form.referenceNumber}
-                  onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
-                  placeholder="TXN123456"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="submit">{editingId ? 'Update Allocation' : 'Allocate Funds'}</Button>
-            </DialogFooter>
-          </form>
+          )}
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete AlertDialog */}
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Fund Allocation</AlertDialogTitle>
+            <AlertDialogTitle>Delete this allocation?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this fund allocation? This action cannot be undone. Only pending allocations can be deleted.
+              This will permanently remove the fund allocation. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-red-500 hover:bg-red-600"
-            >
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageLayout>
   )
 }

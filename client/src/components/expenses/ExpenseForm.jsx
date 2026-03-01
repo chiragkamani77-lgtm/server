@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { sitesApi, categoriesApi, expensesApi } from '@/lib/api'
+import { sitesApi, expensesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,13 +29,11 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
   const isEditing = Boolean(expense)
 
   const [sites, setSites] = useState([])
-  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const [form, setForm] = useState({
     siteId: expense?.site?._id || siteId || '',
-    categoryId: expense?.category?._id || '',
     fundAllocationId: expense?.fundAllocation?._id || '',
     amount: expense?.requestedAmount || '',
     description: expense?.description || '',
@@ -46,21 +44,22 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
-    loadData()
+    loadSites()
   }, [])
 
-  const loadData = async () => {
+  const loadSites = async () => {
     setLoading(true)
     try {
-      const [sitesRes, categoriesRes] = await Promise.all([
-        sitesApi.getAll(),
-        categoriesApi.getAll(),
-      ])
-      // Backend returns arrays directly
-      setSites(Array.isArray(sitesRes.data) ? sitesRes.data : [])
-      setCategories(Array.isArray(categoriesRes.data) ? categoriesRes.data : [])
+      const sitesRes = await sitesApi.getAll()
+      const sitesList = Array.isArray(sitesRes.data) ? sitesRes.data : []
+      setSites(sitesList)
+
+      // Auto-detect site for non-admin (engineer/supervisor) — they only have 1 site
+      if (!isAdmin && !form.siteId && sitesList.length > 0) {
+        setForm((prev) => ({ ...prev, siteId: sitesList[0]._id }))
+      }
     } catch (error) {
-      console.error('Failed to load data:', error)
+      console.error('Failed to load sites:', error)
     } finally {
       setLoading(false)
     }
@@ -70,7 +69,6 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
     const newErrors = {}
 
     if (!form.siteId) newErrors.siteId = 'Site is required'
-    if (!form.categoryId) newErrors.categoryId = 'Category is required'
     if (!form.fundAllocationId) newErrors.fundAllocationId = 'Fund allocation is required'
     if (!form.amount || parseFloat(form.amount) <= 0) {
       newErrors.amount = 'Valid amount is required'
@@ -91,7 +89,6 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
     try {
       const payload = {
         siteId: form.siteId,
-        categoryId: form.categoryId,
         fundAllocationId: form.fundAllocationId,
         amount: parseFloat(form.amount),
         description: form.description,
@@ -100,10 +97,8 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
       }
 
       if (isEditing) {
-        // For editing, non-admins can only update certain fields
         if (!isAdmin) {
           delete payload.siteId
-          delete payload.categoryId
           delete payload.amount
         }
         await expensesApi.update(expense._id, payload)
@@ -114,7 +109,6 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
       onSuccess?.()
     } catch (error) {
       console.error('Failed to save expense:', error)
-      // Show validation errors from server
       if (error.response?.data?.message) {
         setErrors({ submit: error.response.data.message })
       }
@@ -125,7 +119,6 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }))
-    // Clear error when user starts typing
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: null }))
     }
@@ -141,57 +134,40 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Site Selection */}
-      <div className="space-y-2">
-        <Label htmlFor="siteId">
-          Site <span className="text-red-500">*</span>
-        </Label>
-        <Select
-          value={form.siteId}
-          onValueChange={(value) => handleChange('siteId', value)}
-          disabled={isEditing && !isAdmin}
-        >
-          <SelectTrigger className={errors.siteId ? 'border-red-500' : ''}>
-            <SelectValue placeholder="Select site" />
-          </SelectTrigger>
-          <SelectContent>
-            {sites.map((site) => (
-              <SelectItem key={site._id} value={site._id}>
-                {site.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.siteId && (
-          <p className="text-sm text-red-500">{errors.siteId}</p>
-        )}
-      </div>
-
-      {/* Category Selection */}
-      <div className="space-y-2">
-        <Label htmlFor="categoryId">
-          Category <span className="text-red-500">*</span>
-        </Label>
-        <Select
-          value={form.categoryId}
-          onValueChange={(value) => handleChange('categoryId', value)}
-          disabled={isEditing && !isAdmin}
-        >
-          <SelectTrigger className={errors.categoryId ? 'border-red-500' : ''}>
-            <SelectValue placeholder="Select category" />
-          </SelectTrigger>
-          <SelectContent>
-            {categories.map((category) => (
-              <SelectItem key={category._id} value={category._id}>
-                {category.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.categoryId && (
-          <p className="text-sm text-red-500">{errors.categoryId}</p>
-        )}
-      </div>
+      {/* Site — admin selects, engineer/supervisor auto-detected */}
+      {isAdmin ? (
+        <div className="space-y-2">
+          <Label htmlFor="siteId">
+            Site <span className="text-red-500">*</span>
+          </Label>
+          <Select
+            value={form.siteId}
+            onValueChange={(value) => handleChange('siteId', value)}
+            disabled={isEditing && !isAdmin}
+          >
+            <SelectTrigger className={errors.siteId ? 'border-red-500' : ''}>
+              <SelectValue placeholder="Select site" />
+            </SelectTrigger>
+            <SelectContent>
+              {sites.map((site) => (
+                <SelectItem key={site._id} value={site._id}>
+                  {site.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {errors.siteId && (
+            <p className="text-sm text-red-500">{errors.siteId}</p>
+          )}
+        </div>
+      ) : (
+        sites.length > 0 && (
+          <div className="rounded-md bg-muted px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Site: </span>
+            <span className="font-medium">{sites.find(s => s._id === form.siteId)?.name || sites[0]?.name}</span>
+          </div>
+        )
+      )}
 
       {/* Fund Allocation Selector */}
       <div className="space-y-2">
@@ -231,17 +207,6 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
         )}
       </div>
 
-      {/* Vendor Name */}
-      <div className="space-y-2">
-        <Label htmlFor="vendorName">Vendor Name</Label>
-        <Input
-          id="vendorName"
-          placeholder="Enter vendor name"
-          value={form.vendorName}
-          onChange={(e) => handleChange('vendorName', e.target.value)}
-        />
-      </div>
-
       {/* Description */}
       <div className="space-y-2">
         <Label htmlFor="description">
@@ -260,10 +225,21 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
         )}
       </div>
 
+      {/* Vendor Name */}
+      <div className="space-y-2">
+        <Label htmlFor="vendorName">Vendor Name</Label>
+        <Input
+          id="vendorName"
+          placeholder="Enter vendor name (optional)"
+          value={form.vendorName}
+          onChange={(e) => handleChange('vendorName', e.target.value)}
+        />
+      </div>
+
       {/* Expense Date */}
       <div className="space-y-2">
         <Label htmlFor="expenseDate">
-          Expense Date <span className="text-red-500">*</span>
+          Date <span className="text-red-500">*</span>
         </Label>
         <Input
           id="expenseDate"

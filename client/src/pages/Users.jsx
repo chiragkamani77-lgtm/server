@@ -4,24 +4,7 @@ import { usersApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import {
   Select,
   SelectContent,
@@ -41,6 +24,10 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
+import {
+  PageLayout, PageHeader, SummaryBanner, SearchFilterBar,
+  ListItem, ActionBtn, EmptyState,
+} from '@/components/page'
 import { Plus, Edit, Trash2, Users as UsersIcon, UserCheck, UserX } from 'lucide-react'
 
 export default function Users() {
@@ -49,10 +36,10 @@ export default function Users() {
 
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [isEditOpen, setIsEditOpen] = useState(false)
-  const [deleteId, setDeleteId] = useState(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
+  const [deleteId, setDeleteId] = useState(null)
+  const [search, setSearch] = useState('')
 
   const [form, setForm] = useState({
     name: '',
@@ -62,20 +49,14 @@ export default function Users() {
     dailyRate: '',
   })
 
-  useEffect(() => {
-    fetchUsers()
-  }, [])
+  useEffect(() => { fetchUsers() }, [])
 
   const fetchUsers = async () => {
     try {
       const { data } = await usersApi.getAll()
       setUsers(data)
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch users',
-        variant: 'destructive',
-      })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to fetch users', variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -90,65 +71,46 @@ export default function Users() {
         password: form.password,
         role: parseInt(form.role),
       }
-      // Add dailyRate for workers (role 4) or supervisors (role 3)
       if (form.dailyRate && (form.role === '4' || form.role === '3')) {
         userData.dailyRate = parseFloat(form.dailyRate)
       }
       await usersApi.create(userData)
       toast({ title: 'User created successfully' })
-      setIsAddOpen(false)
+      setSheetOpen(false)
       resetForm()
       fetchUsers()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to create user',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to create user', variant: 'destructive' })
     }
   }
 
   const handleEdit = async (e) => {
     e.preventDefault()
     try {
-      const updateData = {
-        name: form.name,
-        email: form.email,
-      }
-      if (form.password) {
-        updateData.password = form.password
-      }
-      // Include dailyRate for workers and supervisors
+      const updateData = { name: form.name, email: form.email }
+      if (form.password) updateData.password = form.password
       if (editingUser.role === 4 || editingUser.role === 3) {
         updateData.dailyRate = parseFloat(form.dailyRate) || 0
       }
       await usersApi.update(editingUser._id, updateData)
-      toast({ title: 'User updated successfully' })
-      setIsEditOpen(false)
+      toast({ title: 'User updated' })
+      setSheetOpen(false)
       setEditingUser(null)
       resetForm()
       fetchUsers()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to update user',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to update user', variant: 'destructive' })
     }
   }
 
   const handleDelete = async () => {
     try {
       await usersApi.delete(deleteId)
-      toast({ title: 'User deleted successfully' })
+      toast({ title: 'User deleted' })
       setDeleteId(null)
       fetchUsers()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to delete user',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to delete user', variant: 'destructive' })
     }
   }
 
@@ -157,13 +119,15 @@ export default function Users() {
       await usersApi.update(userId, { isActive: !currentStatus })
       toast({ title: `User ${currentStatus ? 'deactivated' : 'activated'}` })
       fetchUsers()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to update user status',
-        variant: 'destructive',
-      })
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update user status', variant: 'destructive' })
     }
+  }
+
+  const openAdd = () => {
+    setEditingUser(null)
+    resetForm()
+    setSheetOpen(true)
   }
 
   const openEdit = (user) => {
@@ -175,232 +139,163 @@ export default function Users() {
       role: user.role.toString(),
       dailyRate: user.dailyRate?.toString() || '',
     })
-    setIsEditOpen(true)
+    setSheetOpen(true)
   }
 
   const resetForm = () => {
-    setForm({
-      name: '',
-      email: '',
-      password: '',
-      role: '4',
-      dailyRate: '',
-    })
+    setForm({ name: '', email: '', password: '', role: '4', dailyRate: '' })
   }
 
-  // Count users by role
-  const developerCount = users.filter(u => u.role === 1).length
-  const supervisorCount = users.filter(u => u.role === 2).length
-  const workerCount = users.filter(u => u.role === 3).length
-
-  // Check if current user can manage a specific user
-  const canManageUser = (user) => {
-    // Can't manage yourself
-    if (user._id === currentUser._id) return false
-
-    // Admins can manage everyone
+  const canManageUser = (u) => {
+    if (u._id === currentUser._id) return false
     if (isAdmin) return true
-
-    // Non-admins can only manage users with lower role numbers (higher hierarchy)
-    // Engineer (2) cannot manage Developer (1) or other Engineers (2)
-    // Supervisor (3) cannot manage Developer (1), Engineer (2), or other Supervisors (3)
-    if (user.role <= currentUser.role) return false
-
-    // Non-admins can only manage their direct children
-    return user.parent?._id === currentUser._id
+    if (u.role <= currentUser.role) return false
+    return u.parent?._id === currentUser._id
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-      </div>
-    )
-  }
+  const filteredUsers = users.filter((u) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)
+  })
+
+  const workerCount = users.filter(u => u.role === 4).length
+  const supervisorCount = users.filter(u => u.role === 3).length
+  const engineerCount = users.filter(u => u.role === 2).length
+
+  const summaryItems = isAdmin
+    ? [
+        { label: 'Engineers', value: String(engineerCount) },
+        { label: 'Supervisors', value: String(supervisorCount) },
+        { label: 'Workers', value: String(workerCount) },
+      ]
+    : [
+        { label: 'Supervisors', value: String(supervisorCount) },
+        { label: 'Workers', value: String(workerCount) },
+      ]
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">Users</h1>
-          <p className="text-muted-foreground">
-            Manage team members and their roles
-          </p>
-        </div>
-        <Button onClick={() => setIsAddOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add User
+    <PageLayout>
+      <PageHeader title="Team Members" subtitle={`${users.length} members`}>
+        <Button size="sm" onClick={openAdd} className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Plus className="h-4 w-4 mr-1" />
+          Add Member
         </Button>
-      </div>
+      </PageHeader>
 
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        {isAdmin && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Developers</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{developerCount}</div>
-            </CardContent>
-          </Card>
+      <SummaryBanner
+        color="slate"
+        icon={<UsersIcon className="h-8 w-8" />}
+        items={summaryItems}
+      />
+
+      <SearchFilterBar
+        search={search}
+        onSearch={setSearch}
+        placeholder="Search by name or email..."
+      />
+
+      <div className="flex-1">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <EmptyState
+            message="No team members found"
+            action={
+              <Button variant="outline" size="sm" onClick={openAdd}>
+                <Plus className="h-4 w-4 mr-1" /> Add First Member
+              </Button>
+            }
+            icon={<UsersIcon className="h-12 w-12" />}
+          />
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filteredUsers.map((u) => (
+              <ListItem
+                key={u._id}
+                avatar={u.name}
+                avatarColor={u.role === 2 ? 'blue' : u.role === 3 ? 'green' : 'amber'}
+                title={u.name}
+                subtitle={
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-gray-400">{u.email}</span>
+                    {u.parent?.name && <span className="text-xs text-gray-400">• Reports to {u.parent.name}</span>}
+                    {(u.role === 3 || u.role === 4) && u.dailyRate > 0 && (
+                      <span className="text-xs text-green-600 font-medium">• ₹{u.dailyRate}/day</span>
+                    )}
+                  </div>
+                }
+                badge={{
+                  label: u.isActive ? ROLE_NAMES[u.role] : `${ROLE_NAMES[u.role]} (Inactive)`,
+                  className: u.isActive ? ROLE_COLORS[u.role] : 'bg-gray-100 text-gray-500',
+                }}
+                actions={
+                  canManageUser(u) && (
+                    <>
+                      <ActionBtn
+                        onClick={() => handleToggleActive(u._id, u.isActive)}
+                        title={u.isActive ? 'Deactivate' : 'Activate'}
+                        icon={u.isActive ? UserX : UserCheck}
+                        hoverClass={u.isActive ? 'hover:text-orange-600 hover:bg-orange-50' : 'hover:text-green-600 hover:bg-green-50'}
+                      />
+                      <ActionBtn onClick={() => openEdit(u)} title="Edit" icon={Edit} />
+                      <ActionBtn
+                        onClick={() => setDeleteId(u._id)}
+                        title="Delete"
+                        icon={Trash2}
+                        hoverClass="hover:text-red-600 hover:bg-red-50"
+                      />
+                    </>
+                  )
+                }
+              />
+            ))}
+          </div>
         )}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Supervisors</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{supervisorCount}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Workers</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{workerCount}</div>
-          </CardContent>
-        </Card>
       </div>
 
-      {/* Users Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>All Users</CardTitle>
-          <CardDescription>
-            {isAdmin ? 'All registered users' : 'Your team members'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Daily Rate</TableHead>
-                <TableHead>Reports To</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                    No users found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                users.map((u) => (
-                  <TableRow key={u._id}>
-                    <TableCell className="font-medium">{u.name}</TableCell>
-                    <TableCell>{u.email}</TableCell>
-                    <TableCell>
-                      <Badge className={ROLE_COLORS[u.role]}>
-                        {ROLE_NAMES[u.role]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {(u.role === 3 || u.role === 4) && u.dailyRate > 0 ? (
-                        <span className="text-green-600 font-medium">₹{u.dailyRate}/day</span>
-                      ) : (u.role === 3 || u.role === 4) ? (
-                        <span className="text-muted-foreground text-sm">Not set</span>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {u.parent?.name || '-'}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={u.isActive ? 'default' : 'secondary'}>
-                        {u.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {canManageUser(u) && (
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleToggleActive(u._id, u.isActive)}
-                            title={u.isActive ? 'Deactivate' : 'Activate'}
-                          >
-                            {u.isActive ? (
-                              <UserX className="h-4 w-4" />
-                            ) : (
-                              <UserCheck className="h-4 w-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEdit(u)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeleteId(u._id)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {/* Add / Edit Sheet */}
+      <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) { setEditingUser(null); resetForm() } }}>
+        <SheetContent title={editingUser ? 'Edit Member' : 'Add New Member'}>
+          <form onSubmit={editingUser ? handleEdit : handleAdd} className="px-5 py-4 space-y-4">
+            <div className="space-y-1">
+              <Label>Full Name *</Label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Ramesh Patel"
+                required
+              />
+            </div>
 
-      {/* Add Dialog */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent>
-          <form onSubmit={handleAdd}>
-            <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>
-                Create a new team member under your supervision
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Full Name</Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="John Doe"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  placeholder="john@example.com"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Password</Label>
-                <Input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder="Minimum 6 characters"
-                  required
-                  minLength={6}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Role</Label>
+            <div className="space-y-1">
+              <Label>Email Address *</Label>
+              <Input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                placeholder="ramesh@example.com"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label>{editingUser ? 'New Password (leave blank to keep current)' : 'Password *'}</Label>
+              <Input
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="Minimum 6 characters"
+                required={!editingUser}
+                minLength={6}
+              />
+            </div>
+
+            {!editingUser && (
+              <div className="space-y-1">
+                <Label>Role / Position</Label>
                 <Select
                   value={form.role}
                   onValueChange={(value) => setForm({ ...form, role: value })}
@@ -415,116 +310,52 @@ export default function Users() {
                     <SelectItem value="4">Worker</SelectItem>
                   </SelectContent>
                 </Select>
-                {!isAdmin && (
-                  <p className="text-xs text-muted-foreground">
-                    {currentUser?.role === 2 ? 'Engineers can create Supervisors or Workers' : 'Supervisors can create Workers only'}
-                  </p>
-                )}
               </div>
-              {(form.role === '3' || form.role === '4') && (
-                <div className="space-y-2">
-                  <Label>Daily Rate (₹)</Label>
-                  <Input
-                    type="number"
-                    value={form.dailyRate}
-                    onChange={(e) => setForm({ ...form, dailyRate: e.target.value })}
-                    placeholder="e.g., 355"
-                    min="0"
-                    step="0.01"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Amount paid per day (8 hours). Hourly rate = Daily rate ÷ 8
-                  </p>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button type="submit">Create User</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+            )}
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent>
-          <form onSubmit={handleEdit}>
-            <DialogHeader>
-              <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>
-                Update user information
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Full Name</Label>
+            {((form.role === '3' || form.role === '4') && !editingUser) || (editingUser && (editingUser.role === 3 || editingUser.role === 4)) ? (
+              <div className="space-y-1">
+                <Label>Daily Pay Rate (₹)</Label>
                 <Input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
+                  type="number"
+                  value={form.dailyRate}
+                  onChange={(e) => setForm({ ...form, dailyRate: e.target.value })}
+                  placeholder="e.g. 400"
+                  min="0"
+                  step="0.01"
                 />
+                <p className="text-xs text-gray-400">
+                  Amount paid per working day
+                  {form.dailyRate ? ` • Hourly: ₹${(parseFloat(form.dailyRate) / 8).toFixed(0)}/hr` : ''}
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>New Password (leave blank to keep current)</Label>
-                <Input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder="Enter new password"
-                  minLength={6}
-                />
-              </div>
-              {editingUser && (editingUser.role === 3 || editingUser.role === 4) && (
-                <div className="space-y-2">
-                  <Label>Daily Rate (₹)</Label>
-                  <Input
-                    type="number"
-                    value={form.dailyRate}
-                    onChange={(e) => setForm({ ...form, dailyRate: e.target.value })}
-                    placeholder="e.g., 355"
-                    min="0"
-                    step="0.01"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Amount paid per day (8 hours). Hourly rate: ₹{form.dailyRate ? (parseFloat(form.dailyRate) / 8).toFixed(2) : '0.00'}/hr
-                  </p>
-                </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button type="submit">Save Changes</Button>
-            </DialogFooter>
+            ) : null}
+
+            <Button type="submit" className="w-full h-11 text-base bg-blue-600 hover:bg-blue-700">
+              {editingUser ? 'Save Changes' : 'Add Member'}
+            </Button>
           </form>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       {/* Delete Confirmation */}
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogTitle>Remove this member?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this user. Their child users will be reassigned.
-              This action cannot be undone.
+              This will permanently remove this team member. Their sub-members will be reassigned.
+              This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
-              Delete
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageLayout>
   )
 }

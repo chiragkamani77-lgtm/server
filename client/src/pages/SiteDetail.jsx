@@ -3,16 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { sitesApi, expensesApi, usersApi, billsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   Dialog,
   DialogContent,
@@ -21,12 +12,31 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useToast } from '@/hooks/use-toast'
 import { useExpensePermissions } from '@/hooks/useExpensePermissions'
 import { ExpenseTable, ExpenseForm, ExpenseFilters } from '@/components/expenses'
 import { BillForm, BillActions } from '@/components/bills'
-import { formatCurrency, STATUS_COLORS, ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
-import { ArrowLeft, Plus, UserPlus, X, CheckCircle, Ban, DollarSign } from 'lucide-react'
+import { formatCurrency, formatDate, STATUS_COLORS, ROLE_NAMES, ROLE_COLORS } from '@/lib/utils'
+import { Plus, UserPlus, X, CheckCircle, Ban, DollarSign, Wallet, Users as UsersIcon } from 'lucide-react'
+import {
+  PageLayout, PageHeader, SummaryBanner, ListItem, ActionBtn, EmptyState,
+} from '@/components/page'
+
+const FUND_STATUS_COLORS = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  approved: 'bg-blue-100 text-blue-800',
+  disbursed: 'bg-green-100 text-green-800',
+  rejected: 'bg-red-100 text-red-800',
+}
+
+const BILL_STATUS_COLORS = {
+  pending: 'bg-yellow-100 text-yellow-800',
+  approved: 'bg-blue-100 text-blue-800',
+  paid: 'bg-green-100 text-green-800',
+  credited: 'bg-purple-100 text-purple-800',
+  rejected: 'bg-red-100 text-red-800',
+}
 
 export default function SiteDetail() {
   const { id } = useParams()
@@ -51,22 +61,14 @@ export default function SiteDetail() {
   const [isAddBillOpen, setIsAddBillOpen] = useState(false)
   const [billActionState, setBillActionState] = useState({ isOpen: false, bill: null, action: 'approve' })
 
-  const [expenseFilters, setExpenseFilters] = useState({
-    category: '',
-    startDate: '',
-    endDate: '',
-  })
+  const [expenseFilters, setExpenseFilters] = useState({ category: '', startDate: '', endDate: '' })
 
-  useEffect(() => {
-    fetchSiteData()
-  }, [id])
+  useEffect(() => { fetchSiteData() }, [id])
 
   useEffect(() => {
     if (site) {
       fetchExpenses()
-      if (isAdmin) {
-        fetchBills()
-      }
+      if (isAdmin) fetchBills()
     }
   }, [site, expenseFilters])
 
@@ -78,24 +80,16 @@ export default function SiteDetail() {
         expensesApi.getSummary(id),
         sitesApi.getFunds(id),
       ])
-
       setSite(siteRes.data)
       setSummary(summaryRes.data)
       setFundSummary(fundsRes.data.summary)
       setFundAllocations(fundsRes.data.allocations || [])
-
       if (canManageUsers) {
         const usersRes = await usersApi.getAll()
-        // Backend returns array directly
         setUsers(Array.isArray(usersRes.data) ? usersRes.data : [])
       }
     } catch (error) {
-      console.error('Error loading site:', error)
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to load site details',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to load site', variant: 'destructive' })
       navigate('/sites')
     } finally {
       setLoading(false)
@@ -105,25 +99,12 @@ export default function SiteDetail() {
   const fetchExpenses = async () => {
     setExpensesLoading(true)
     try {
-      const params = {
-        siteId: id,
-        ...expenseFilters,
-      }
-
-      // Remove empty filters
-      Object.keys(params).forEach((key) => {
-        if (!params[key]) delete params[key]
-      })
-
-      const expensesRes = await expensesApi.getAll(params)
-      setExpenses(expensesRes.data?.expenses || [])
+      const params = { siteId: id, ...expenseFilters }
+      Object.keys(params).forEach((key) => { if (!params[key]) delete params[key] })
+      const res = await expensesApi.getAll(params)
+      setExpenses(res.data?.expenses || [])
     } catch (error) {
-      console.error('Error loading expenses:', error)
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to load expenses',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: 'Failed to load expenses', variant: 'destructive' })
     } finally {
       setExpensesLoading(false)
     }
@@ -132,15 +113,10 @@ export default function SiteDetail() {
   const fetchBills = async () => {
     setBillsLoading(true)
     try {
-      const billsRes = await billsApi.getAll({ siteId: id })
-      setBills(billsRes.data?.bills || [])
-    } catch (error) {
-      console.error('Error loading bills:', error)
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to load bills',
-        variant: 'destructive',
-      })
+      const res = await billsApi.getAll({ siteId: id })
+      setBills(res.data?.bills || [])
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load bills', variant: 'destructive' })
     } finally {
       setBillsLoading(false)
     }
@@ -149,33 +125,20 @@ export default function SiteDetail() {
   const handleAddExpenseSuccess = () => {
     setIsAddExpenseOpen(false)
     fetchExpenses()
-    fetchSiteData() // Refresh summary
-    toast({
-      title: 'Success',
-      description: 'Expense added successfully.',
-    })
+    fetchSiteData()
+    toast({ title: 'Expense added successfully' })
   }
 
   const handleAddBillSuccess = () => {
     setIsAddBillOpen(false)
     fetchBills()
-    fetchSiteData() // Refresh summary
-    toast({
-      title: 'Success',
-      description: 'GST Bill added successfully.',
-    })
-  }
-
-  const handleBillAction = (bill, action) => {
-    setBillActionState({ isOpen: true, bill, action })
+    fetchSiteData()
+    toast({ title: 'GST Bill added successfully' })
   }
 
   const handleBillActionSuccess = async () => {
     setBillActionState({ isOpen: false, bill: null, action: 'approve' })
-    toast({
-      title: 'Success',
-      description: 'Bill updated successfully',
-    })
+    toast({ title: 'Bill updated successfully' })
     await fetchBills()
     await fetchSiteData()
   }
@@ -187,11 +150,7 @@ export default function SiteDetail() {
       setIsAssignUserOpen(false)
       fetchSiteData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to assign user',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: error.response?.data?.message || 'Failed to assign user', variant: 'destructive' })
     }
   }
 
@@ -201,566 +160,331 @@ export default function SiteDetail() {
       toast({ title: 'User removed from site' })
       fetchSiteData()
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.message || 'Failed to remove user',
-        variant: 'destructive',
-      })
+      toast({ title: 'Error', description: 'Failed to remove user', variant: 'destructive' })
     }
+  }
+
+  const canRemoveUser = (u) => {
+    if (isAdmin) return true
+    if (currentUser.role === 2) return u.role === 3 || u.role === 4
+    if (currentUser.role === 3) return u.role === 4
+    return false
+  }
+
+  const getAvailableUsersForAssignment = () => {
+    const unassigned = users.filter(u => !site.assignedUsers?.some(au => au._id === u._id))
+    if (isAdmin) return unassigned
+    if (currentUser.role === 2) return unassigned.filter(u => u.role === 3 || u.role === 4)
+    if (currentUser.role === 3) return unassigned.filter(u => u.role === 4)
+    return []
   }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
       </div>
     )
   }
 
   if (!site) return null
 
-  // Check if current user can remove a specific user from site
-  const canRemoveUser = (user) => {
-    // Developers can remove anyone
-    if (isAdmin) return true
-
-    // Engineers (role 2) can remove any supervisor or worker
-    if (currentUser.role === 2) {
-      return user.role === 3 || user.role === 4
-    }
-
-    // Supervisors (role 3) can remove any worker (role 4)
-    if (currentUser.role === 3) {
-      return user.role === 4
-    }
-
-    return false
-  }
-
-  // Filter users based on role for assignment
-  const getAvailableUsersForAssignment = () => {
-    const unassignedUsers = users.filter(
-      (u) => !site.assignedUsers?.some((au) => au._id === u._id)
-    )
-
-    // Developers can assign anyone
-    if (isAdmin) return unassignedUsers
-
-    // Engineers can assign any supervisor or worker
-    if (currentUser.role === 2) {
-      return unassignedUsers.filter(u => u.role === 3 || u.role === 4)
-    }
-
-    // Supervisors can assign any worker
-    if (currentUser.role === 3) {
-      return unassignedUsers.filter(u => u.role === 4)
-    }
-
-    return []
-  }
-
   const availableUsers = getAvailableUsersForAssignment()
+  const remainingFunds = fundSummary?.remainingFunds || 0
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/sites')}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold">{site.name}</h1>
-            <Badge className={STATUS_COLORS[site.status]}>
-              {site.status.replace('_', ' ')}
-            </Badge>
-          </div>
-          {site.address && <p className="text-muted-foreground">{site.address}</p>}
+    <PageLayout>
+      <PageHeader
+        title={site.name}
+        subtitle={site.address || 'No address'}
+        onBack={() => navigate('/sites')}
+      >
+        <Badge className={STATUS_COLORS[site.status]}>
+          {site.status === 'on_hold' ? 'On Hold' : site.status.charAt(0).toUpperCase() + site.status.slice(1)}
+        </Badge>
+      </PageHeader>
+
+      {/* Fund Summary Banner */}
+      <SummaryBanner
+        color="teal"
+        icon={<Wallet className="h-8 w-8" />}
+        items={[
+          { label: 'Remaining Funds', value: formatCurrency(remainingFunds) },
+          { label: 'Disbursed', value: formatCurrency(fundSummary?.totalDisbursed || 0) },
+          { label: 'Spent', value: formatCurrency(fundSummary?.totalExpenses || 0) },
+        ]}
+      />
+
+      {/* Mini stat row */}
+      <div className="px-4 pb-2 grid grid-cols-3 gap-2">
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+          <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">Allocated</p>
+          <p className="text-sm font-bold text-slate-700">{formatCurrency(fundSummary?.totalAllocated || 0)}</p>
+        </div>
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+          <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">Expenses</p>
+          <p className="text-sm font-bold text-slate-700">{summary?.totalEntries || 0} entries</p>
+        </div>
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
+          <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide">Team</p>
+          <p className="text-sm font-bold text-slate-700">{site.assignedUsers?.length || 0} members</p>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Funds Allocated</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(fundSummary?.totalAllocated || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Pending: {formatCurrency(fundSummary?.totalPending || 0)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Funds Disbursed</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {formatCurrency(fundSummary?.totalDisbursed || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Available to spend
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">
-              {formatCurrency(fundSummary?.totalExpenses || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Pending: {formatCurrency(fundSummary?.pendingExpenses || 0)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Remaining Funds</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${(fundSummary?.remainingFunds || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {formatCurrency(fundSummary?.remainingFunds || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {fundSummary?.utilizationPercentage || 0}% utilized
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Expense Entries</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary?.totalEntries || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Total records
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Assigned Users</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{site.assignedUsers?.length || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Team members
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Tabs */}
-      <Tabs defaultValue="expenses" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="expenses">Expenses</TabsTrigger>
-          <TabsTrigger value="funds">Funds</TabsTrigger>
-          {isAdmin && <TabsTrigger value="bills">GST Bills</TabsTrigger>}
-          {canManageUsers && <TabsTrigger value="users">Team</TabsTrigger>}
-          <TabsTrigger value="summary">Summary</TabsTrigger>
-        </TabsList>
+      <div className="flex-1 flex flex-col">
+        <Tabs defaultValue="expenses" className="flex-1 flex flex-col">
+          <div className="px-4 border-b bg-white shrink-0">
+            <TabsList className="h-10 bg-transparent border-0 gap-1 p-0">
+              <TabsTrigger value="expenses" className="data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700 rounded-lg text-sm">Expenses</TabsTrigger>
+              <TabsTrigger value="funds" className="data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700 rounded-lg text-sm">Funds</TabsTrigger>
+              {isAdmin && <TabsTrigger value="bills" className="data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700 rounded-lg text-sm">GST Bills</TabsTrigger>}
+              {canManageUsers && <TabsTrigger value="users" className="data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700 rounded-lg text-sm">Team</TabsTrigger>}
+              <TabsTrigger value="summary" className="data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700 rounded-lg text-sm">Summary</TabsTrigger>
+            </TabsList>
+          </div>
 
-        {/* Expenses Tab - Using Reusable Components */}
-        <TabsContent value="expenses" className="space-y-4">
-          {/* Add Expense Button */}
-          {permissions.canCreate && (
-            <div className="flex justify-end">
-              <Button onClick={() => setIsAddExpenseOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Expense
-              </Button>
-            </div>
-          )}
-
-          {/* Expense Filters */}
-          <ExpenseFilters
-            filters={expenseFilters}
-            onChange={setExpenseFilters}
-            onClear={() =>
-              setExpenseFilters({
-                category: '',
-                startDate: '',
-                endDate: '',
-              })
-            }
-            hideSiteFilter={true}
-          />
-
-          {/* Expense Table */}
-          <Card>
-            <CardContent className="pt-6">
-              <ExpenseTable
-                expenses={expenses}
-                loading={expensesLoading}
-                onRefresh={fetchExpenses}
-                showSiteColumn={false}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Funds Tab */}
-        <TabsContent value="funds" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Fund Allocations</CardTitle>
-              <CardDescription>Funds allocated to this site</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {fundAllocations.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">
-                  No fund allocations for this site yet
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Purpose</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Reference</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {fundAllocations.map((allocation) => (
-                      <TableRow key={allocation._id}>
-                        <TableCell>
-                          {new Date(allocation.allocationDate).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {allocation.fromUser?.name}
-                        </TableCell>
-                        <TableCell>{allocation.toUser?.name}</TableCell>
-                        <TableCell className="font-bold">
-                          {formatCurrency(allocation.amount)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {allocation.purpose?.replace(/_/g, ' ').toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={
-                              allocation.status === 'disbursed'
-                                ? 'bg-green-100 text-green-800'
-                                : allocation.status === 'approved'
-                                ? 'bg-blue-100 text-blue-800'
-                                : allocation.status === 'rejected'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                            }
-                          >
-                            {allocation.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {allocation.referenceNumber || '-'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+          {/* Expenses Tab */}
+          <TabsContent value="expenses" className="flex-1 mt-0">
+            <div className="p-4 space-y-3">
+              {permissions.canCreate && (
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={() => setIsAddExpenseOpen(true)} className="bg-teal-600 hover:bg-teal-700 text-white">
+                    <Plus className="h-4 w-4 mr-1" /> Add Expense
+                  </Button>
+                </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* GST Bills Tab (Developer Only) */}
-        {isAdmin && (
-          <TabsContent value="bills" className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setIsAddBillOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add GST Bill
-              </Button>
+              <ExpenseFilters
+                filters={expenseFilters}
+                onChange={setExpenseFilters}
+                onClear={() => setExpenseFilters({ category: '', startDate: '', endDate: '' })}
+                hideSiteFilter={true}
+              />
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <ExpenseTable
+                  expenses={expenses}
+                  loading={expensesLoading}
+                  onRefresh={fetchExpenses}
+                  showSiteColumn={false}
+                />
+              </div>
             </div>
+          </TabsContent>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>GST Bills</CardTitle>
-                <CardDescription>Bills and invoices with GST for this site</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {billsLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                  </div>
-                ) : bills.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">
-                    No GST bills for this site yet
-                  </p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Vendor</TableHead>
-                        <TableHead>Invoice #</TableHead>
-                        <TableHead>Base Amount</TableHead>
-                        <TableHead>GST %</TableHead>
-                        <TableHead>GST Amount</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {bills.map((bill) => (
-                        <TableRow key={bill._id}>
-                          <TableCell>
-                            {new Date(bill.billDate).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            <div>{bill.vendorName}</div>
-                            {bill.vendorGstNumber && (
-                              <div className="text-xs text-muted-foreground">
-                                GSTIN: {bill.vendorGstNumber}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>{bill.invoiceNumber || '-'}</TableCell>
-                          <TableCell>{formatCurrency(bill.baseAmount)}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{bill.gstRate}%</Badge>
-                          </TableCell>
-                          <TableCell className="text-orange-600">
-                            {formatCurrency(bill.gstAmount)}
-                          </TableCell>
-                          <TableCell className="font-bold">
-                            {formatCurrency(bill.totalAmount)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">
-                              {bill.billType?.replace(/_/g, ' ').toUpperCase()}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              className={
-                                bill.status === 'paid'
-                                  ? 'bg-green-100 text-green-800'
-                                  : bill.status === 'approved'
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : bill.status === 'credited'
-                                  ? 'bg-purple-100 text-purple-800'
-                                  : bill.status === 'rejected'
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }
-                            >
-                              {bill.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {bill.status === 'pending' && (
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs"
-                                  onClick={() => handleBillAction(bill, 'approve')}
-                                >
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Approve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs text-red-600 hover:text-red-700"
-                                  onClick={() => handleBillAction(bill, 'reject')}
-                                >
-                                  <Ban className="h-3 w-3 mr-1" />
-                                  Reject
-                                </Button>
-                              </div>
-                            )}
-                            {bill.status === 'approved' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => handleBillAction(bill, 'pay')}
-                              >
-                                <DollarSign className="h-3 w-3 mr-1" />
-                                Mark Paid
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+          {/* Funds Tab */}
+          <TabsContent value="funds" className="flex-1 mt-0">
+            {fundAllocations.length === 0 ? (
+              <EmptyState
+                message="No fund allocations for this site"
+                icon={<Wallet className="h-12 w-12" />}
+              />
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {fundAllocations.map((allocation) => (
+                  <ListItem
+                    key={allocation._id}
+                    avatar={allocation.fromUser?.name}
+                    avatarColor="teal"
+                    title={`${allocation.fromUser?.name || '—'} → ${allocation.toUser?.name || '—'}`}
+                    subtitle={
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs text-gray-400">{formatDate(allocation.allocationDate)}</span>
+                        <span className="text-xs text-gray-400">• {allocation.purpose?.replace(/_/g, ' ')}</span>
+                        {allocation.referenceNumber && <span className="text-xs text-gray-400">• {allocation.referenceNumber}</span>}
+                      </div>
+                    }
+                    amount={formatCurrency(allocation.amount)}
+                    badge={{ label: allocation.status, className: FUND_STATUS_COLORS[allocation.status] || '' }}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
 
-                {/* GST Summary for this site */}
-                {bills.length > 0 && (
-                  <div className="mt-6 pt-6 border-t">
-                    <h4 className="font-semibold mb-4">GST Summary</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-gray-50 p-3 rounded">
-                        <p className="text-xs text-muted-foreground">Total Base Amount</p>
-                        <p className="text-lg font-bold">
-                          {formatCurrency(bills.reduce((sum, b) => sum + b.baseAmount, 0))}
-                        </p>
+          {/* GST Bills Tab */}
+          {isAdmin && (
+            <TabsContent value="bills" className="flex-1 mt-0">
+              <div className="p-4">
+                <div className="flex justify-end mb-3">
+                  <Button size="sm" onClick={() => setIsAddBillOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                    <Plus className="h-4 w-4 mr-1" /> Add GST Bill
+                  </Button>
+                </div>
+              </div>
+              {billsLoading ? (
+                <div className="flex justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+                </div>
+              ) : bills.length === 0 ? (
+                <EmptyState message="No GST bills for this site" />
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {bills.map((bill) => (
+                    <ListItem
+                      key={bill._id}
+                      avatar={bill.vendorName}
+                      avatarColor="indigo"
+                      title={bill.vendorName}
+                      subtitle={
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs text-gray-400">{formatDate(bill.billDate)}</span>
+                          {bill.invoiceNumber && <span className="text-xs text-gray-400">• #{bill.invoiceNumber}</span>}
+                          <span className="text-xs text-gray-400">• GST {bill.gstRate}%</span>
+                          {bill.vendorGstNumber && <span className="text-xs text-gray-400">• GSTIN: {bill.vendorGstNumber}</span>}
+                        </div>
+                      }
+                      amount={formatCurrency(bill.totalAmount)}
+                      badge={{ label: bill.status, className: BILL_STATUS_COLORS[bill.status] || '' }}
+                      actions={
+                        <>
+                          {bill.status === 'pending' && (
+                            <>
+                              <ActionBtn
+                                onClick={() => setBillActionState({ isOpen: true, bill, action: 'approve' })}
+                                title="Approve"
+                                icon={CheckCircle}
+                                hoverClass="hover:text-green-600 hover:bg-green-50"
+                              />
+                              <ActionBtn
+                                onClick={() => setBillActionState({ isOpen: true, bill, action: 'reject' })}
+                                title="Reject"
+                                icon={Ban}
+                                hoverClass="hover:text-red-600 hover:bg-red-50"
+                              />
+                            </>
+                          )}
+                          {bill.status === 'approved' && (
+                            <ActionBtn
+                              onClick={() => setBillActionState({ isOpen: true, bill, action: 'pay' })}
+                              title="Mark Paid"
+                              icon={DollarSign}
+                              hoverClass="hover:text-teal-600 hover:bg-teal-50"
+                            />
+                          )}
+                        </>
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* GST Summary */}
+              {bills.length > 0 && (
+                <div className="px-4 pt-2 pb-4">
+                  <div className="bg-white rounded-xl border border-gray-100 p-4">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">GST Summary</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2 bg-gray-50 rounded-lg text-center">
+                        <p className="text-[10px] text-gray-400">Base Amount</p>
+                        <p className="text-sm font-bold">{formatCurrency(bills.reduce((s, b) => s + b.baseAmount, 0))}</p>
                       </div>
-                      <div className="bg-orange-50 p-3 rounded">
-                        <p className="text-xs text-muted-foreground">Total GST</p>
-                        <p className="text-lg font-bold text-orange-600">
-                          {formatCurrency(bills.reduce((sum, b) => sum + b.gstAmount, 0))}
-                        </p>
+                      <div className="p-2 bg-orange-50 rounded-lg text-center">
+                        <p className="text-[10px] text-orange-400">Total GST</p>
+                        <p className="text-sm font-bold text-orange-600">{formatCurrency(bills.reduce((s, b) => s + b.gstAmount, 0))}</p>
                       </div>
-                      <div className="bg-blue-50 p-3 rounded">
-                        <p className="text-xs text-muted-foreground">Total Amount</p>
-                        <p className="text-lg font-bold text-blue-600">
-                          {formatCurrency(bills.reduce((sum, b) => sum + b.totalAmount, 0))}
-                        </p>
+                      <div className="p-2 bg-blue-50 rounded-lg text-center">
+                        <p className="text-[10px] text-blue-400">Total w/ GST</p>
+                        <p className="text-sm font-bold text-blue-600">{formatCurrency(bills.reduce((s, b) => s + b.totalAmount, 0))}</p>
                       </div>
-                      <div className="bg-green-50 p-3 rounded">
-                        <p className="text-xs text-muted-foreground">Total Bills</p>
-                        <p className="text-lg font-bold text-green-600">
-                          {bills.length}
-                        </p>
+                      <div className="p-2 bg-green-50 rounded-lg text-center">
+                        <p className="text-[10px] text-green-400">Total Bills</p>
+                        <p className="text-sm font-bold text-green-600">{bills.length}</p>
                       </div>
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
+                </div>
+              )}
+            </TabsContent>
+          )}
 
-        {/* Users Tab */}
-        {canManageUsers && (
-          <TabsContent value="users" className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setIsAssignUserOpen(true)}>
-                <UserPlus className="h-4 w-4 mr-2" />
-                Assign User
-              </Button>
-            </div>
-
-            <Card>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {site.assignedUsers?.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground py-8"
-                      >
-                        No users assigned
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    site.assignedUsers?.map((u) => (
-                      <TableRow key={u._id}>
-                        <TableCell className="font-medium">{u.name}</TableCell>
-                        <TableCell>{u.email}</TableCell>
-                        <TableCell>
-                          <Badge className={ROLE_COLORS[u.role]}>
-                            {ROLE_NAMES[u.role]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {canRemoveUser(u) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleUnassignUser(u._id)}
-                              title="Remove from site"
-                            >
-                              <X className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </Card>
-          </TabsContent>
-        )}
-
-        {/* Summary Tab */}
-        <TabsContent value="summary">
-          <Card>
-            <CardHeader>
-              <CardTitle>Category Breakdown</CardTitle>
-              <CardDescription>Expenses by category</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {summary?.categoryBreakdown?.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">
-                  No expense data available
-                </p>
+          {/* Team Tab */}
+          {canManageUsers && (
+            <TabsContent value="users" className="flex-1 mt-0">
+              <div className="p-4 flex justify-end">
+                <Button size="sm" onClick={() => setIsAssignUserOpen(true)} className="bg-slate-700 hover:bg-slate-800 text-white">
+                  <UserPlus className="h-4 w-4 mr-1" /> Assign Member
+                </Button>
+              </div>
+              {site.assignedUsers?.length === 0 ? (
+                <EmptyState message="No team members assigned" icon={<UsersIcon className="h-12 w-12" />} />
               ) : (
-                <div className="space-y-4">
-                  {summary?.categoryBreakdown?.map((cat) => (
-                    <div key={cat._id} className="flex items-center justify-between">
+                <div className="divide-y divide-gray-100">
+                  {site.assignedUsers?.map((u) => (
+                    <ListItem
+                      key={u._id}
+                      avatar={u.name}
+                      avatarColor={u.role === 2 ? 'blue' : u.role === 3 ? 'green' : 'amber'}
+                      title={u.name}
+                      subtitle={<span className="text-xs text-gray-400">{u.email}</span>}
+                      badge={{ label: ROLE_NAMES[u.role], className: ROLE_COLORS[u.role] }}
+                      actions={
+                        canRemoveUser(u) && (
+                          <ActionBtn
+                            onClick={() => handleUnassignUser(u._id)}
+                            title="Remove"
+                            icon={X}
+                            hoverClass="hover:text-red-600 hover:bg-red-50"
+                          />
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {/* Summary Tab */}
+          <TabsContent value="summary" className="flex-1 mt-0">
+            <div className="p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Category Breakdown</p>
+              {!summary?.categoryBreakdown?.length ? (
+                <p className="text-center text-gray-400 py-8 text-sm">No expense data available</p>
+              ) : (
+                <div className="space-y-2">
+                  {summary.categoryBreakdown.map((cat) => (
+                    <div key={cat._id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-gray-100">
                       <div>
-                        <p className="font-medium">{cat.category}</p>
-                        <p className="text-sm text-muted-foreground">{cat.count} entries</p>
+                        <p className="text-sm font-medium text-gray-800">{cat.category}</p>
+                        <p className="text-xs text-gray-400">{cat.count} entries</p>
                       </div>
-                      <p className="font-bold">{formatCurrency(cat.total)}</p>
+                      <p className="font-bold text-gray-900">{formatCurrency(cat.total)}</p>
                     </div>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
 
-      {/* Add Expense Dialog - Using Reusable Form */}
-      <Dialog open={isAddExpenseOpen} onOpenChange={setIsAddExpenseOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Add Expense to {site.name}</DialogTitle>
-          </DialogHeader>
-          <ExpenseForm
-            siteId={id}
-            onSuccess={handleAddExpenseSuccess}
-            onCancel={() => setIsAddExpenseOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {/* Add Expense Sheet */}
+      <Sheet open={isAddExpenseOpen} onOpenChange={setIsAddExpenseOpen}>
+        <SheetContent title={`Add Expense — ${site.name}`}>
+          <div className="px-5 py-4">
+            <ExpenseForm
+              siteId={id}
+              onSuccess={handleAddExpenseSuccess}
+              onCancel={() => setIsAddExpenseOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
-      {/* Add GST Bill Dialog - Using Reusable Form */}
-      <Dialog open={isAddBillOpen} onOpenChange={setIsAddBillOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Add GST Bill to {site.name}</DialogTitle>
-          </DialogHeader>
-          <BillForm
-            siteId={id}
-            onSuccess={handleAddBillSuccess}
-            onCancel={() => setIsAddBillOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {/* Add GST Bill Sheet */}
+      <Sheet open={isAddBillOpen} onOpenChange={setIsAddBillOpen}>
+        <SheetContent title={`Add GST Bill — ${site.name}`}>
+          <div className="px-5 py-4">
+            <BillForm
+              siteId={id}
+              onSuccess={handleAddBillSuccess}
+              onCancel={() => setIsAddBillOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
-      {/* Bill Actions Dialog (Approve/Pay/Reject) */}
+      {/* Bill Actions Dialog */}
       <BillActions
         bill={billActionState.bill}
         isOpen={billActionState.isOpen}
@@ -773,24 +497,22 @@ export default function SiteDetail() {
       <Dialog open={isAssignUserOpen} onOpenChange={setIsAssignUserOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign User to Site</DialogTitle>
-            <DialogDescription>Select a user to assign to {site.name}</DialogDescription>
+            <DialogTitle>Assign Team Member</DialogTitle>
+            <DialogDescription>Select a member to assign to {site.name}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-4">
+          <div className="space-y-1.5 py-2 max-h-72 overflow-y-auto">
             {availableUsers.length === 0 ? (
-              <p className="text-muted-foreground text-center py-4">
-                No available users to assign
-              </p>
+              <p className="text-gray-400 text-center py-4 text-sm">No available members to assign</p>
             ) : (
               availableUsers.map((u) => (
                 <div
                   key={u._id}
-                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted cursor-pointer"
+                  className="flex items-center justify-between p-3 rounded-xl border hover:bg-gray-50 cursor-pointer"
                   onClick={() => handleAssignUser(u._id)}
                 >
                   <div>
-                    <p className="font-medium">{u.name}</p>
-                    <p className="text-sm text-muted-foreground">{u.email}</p>
+                    <p className="text-sm font-medium">{u.name}</p>
+                    <p className="text-xs text-gray-400">{u.email}</p>
                   </div>
                   <Badge className={ROLE_COLORS[u.role]}>{ROLE_NAMES[u.role]}</Badge>
                 </div>
@@ -799,6 +521,6 @@ export default function SiteDetail() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageLayout>
   )
 }
