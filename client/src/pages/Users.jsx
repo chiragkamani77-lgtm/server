@@ -149,7 +149,10 @@ export default function Users() {
   const canManageUser = (u) => {
     if (u._id === currentUser._id) return false
     if (isAdmin) return true
-    if (u.role <= currentUser.role) return false
+    if (u.role <= currentUser.role) return false  // can't manage same/higher role
+    // Engineers can manage all supervisors and workers
+    if (currentUser.role === 2) return u.role >= 3
+    // Supervisors can only manage workers they directly added
     return u.parent?._id === currentUser._id
   }
 

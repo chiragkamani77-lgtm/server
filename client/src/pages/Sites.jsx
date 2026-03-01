@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { sitesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -29,7 +29,7 @@ import {
   PageLayout, PageHeader, SummaryBanner, SearchFilterBar,
   ListItem, ActionBtn, EmptyState,
 } from '@/components/page'
-import { Plus, Building, Eye, Edit, Trash2, Users } from 'lucide-react'
+import { Plus, Building, Edit, Trash2, Users } from 'lucide-react'
 
 const STATUS_COLORS = {
   active: 'bg-green-100 text-green-700',
@@ -40,6 +40,7 @@ const STATUS_COLORS = {
 export default function Sites() {
   const { isAdmin } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
 
   const [sites, setSites] = useState([])
   const [loading, setLoading] = useState(true)
@@ -194,30 +195,24 @@ export default function Sites() {
                   label: site.status.replace('_', ' '),
                   className: STATUS_COLORS[site.status] || '',
                 }}
+                onClick={() => navigate(`/sites/${site._id}`)}
                 actions={
-                  <>
-                    <Button
-                      asChild
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-gray-400 hover:text-teal-600 hover:bg-teal-50"
-                    >
-                      <Link to={`/sites/${site._id}`}>
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                    {isAdmin && (
-                      <>
-                        <ActionBtn onClick={() => openEdit(site)} title="Edit" icon={Edit} hoverClass="hover:text-teal-600 hover:bg-teal-50" />
-                        <ActionBtn
-                          onClick={() => setDeleteId(site._id)}
-                          title="Delete"
-                          icon={Trash2}
-                          hoverClass="hover:text-red-600 hover:bg-red-50"
-                        />
-                      </>
-                    )}
-                  </>
+                  isAdmin && (
+                    <>
+                      <ActionBtn
+                        onClick={() => openEdit(site)}
+                        title="Edit"
+                        icon={Edit}
+                        hoverClass="hover:text-teal-600 hover:bg-teal-50"
+                      />
+                      <ActionBtn
+                        onClick={() => setDeleteId(site._id)}
+                        title="Delete"
+                        icon={Trash2}
+                        hoverClass="hover:text-red-600 hover:bg-red-50"
+                      />
+                    </>
+                  )
                 }
               />
             ))}

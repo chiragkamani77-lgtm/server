@@ -19,22 +19,10 @@ const getVisibilityFilter = async (user, siteId) => {
   switch (user.role) {
     case 1: // Developer - sees all expenses
       break;
-    case 2: { // Engineer
-      const childIds = await user.getChildIds({
-    roles: [3],      // workers only
-    siteId
-  });
-
-  const parentId = user.parent;
-
-  filter.user = {
-    $in: [
-      user._id,
-      ...childIds,
-      ...(parentId ? [parentId] : [])
-    ]
-  };
-  break;
+    case 2: { // Engineer - sees own + all subordinates (supervisors + workers)
+      const childIds = await user.getChildIds({ roles: [3, 4], siteId });
+      filter.user = { $in: [user._id, ...childIds] };
+      break;
     }
     case 3: // Worker - sees only own expenses
       filter.user = user._id;
@@ -56,16 +44,7 @@ const maskChildAmounts = (expense, currentUser) => {
     return expense;
   }
 
-  // For supervisor viewing child expenses - hide amounts
-  if (currentUser.role === 2) {
-    const masked = expense.toObject ? expense.toObject() : { ...expense };
-    masked.amount = null;
-    masked.requestedAmount = null;
-    masked.approvedAmount = null;
-    masked.amountHidden = true;
-    return masked;
-  }
-
+  // Engineers (role 2) can see all amounts to approve/reject
   return expense;
 };
 
@@ -83,8 +62,8 @@ router.get('/', authenticate, async (req, res) => {
       if (endDate) filter.expenseDate.$lte = new Date(endDate);
     }
 
-    // If not level 1, also filter by assigned sites
-    if (req.user.role !== 1 && !siteId) {
+    // For supervisor/worker (role >= 3), restrict to their assigned sites
+    if (req.user.role >= 3 && !siteId) {
       const sites = await Site.find({ assignedUsers: req.user._id }).select('_id');
       filter.site = { $in: sites.map(s => s._id) };
     }

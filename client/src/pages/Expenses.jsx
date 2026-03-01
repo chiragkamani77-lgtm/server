@@ -13,7 +13,7 @@ import {
   PageLayout, PageHeader, SummaryBanner, SearchFilterBar,
   ListItem, ActionBtn, PagePagination, EmptyState,
 } from '@/components/page'
-import { Plus, Trash2, TrendingUp, Edit, CheckCircle } from 'lucide-react'
+import { Plus, Trash2, TrendingUp, Edit, CheckCircle, XCircle } from 'lucide-react'
 
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -175,12 +175,20 @@ export default function Expenses() {
                       <ActionBtn onClick={() => openEdit(expense)} title="Edit" icon={Edit} />
                     )}
                     {permissions.canApprove && expense.status === 'pending' && (
-                      <ActionBtn
-                        onClick={() => { setApproveExpense(expense); setApproveAction('approve') }}
-                        title="Approve"
-                        icon={CheckCircle}
-                        hoverClass="hover:text-green-600 hover:bg-green-50"
-                      />
+                      <>
+                        <ActionBtn
+                          onClick={() => { setApproveExpense(expense); setApproveAction('approve') }}
+                          title="Approve"
+                          icon={CheckCircle}
+                          hoverClass="hover:text-green-600 hover:bg-green-50"
+                        />
+                        <ActionBtn
+                          onClick={() => { setApproveExpense(expense); setApproveAction('reject') }}
+                          title="Reject"
+                          icon={XCircle}
+                          hoverClass="hover:text-red-600 hover:bg-red-50"
+                        />
+                      </>
                     )}
                     {permissions.canDelete(expense) && (
                       <ActionBtn

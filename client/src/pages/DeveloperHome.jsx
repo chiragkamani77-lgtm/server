@@ -2,26 +2,22 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { MobileLayout, FeedItem, EmptyFeed } from '@/components/mobile'
-import { ExpenseForm } from '@/components/expenses/ExpenseForm'
-import { ExpenseActions } from '@/components/expenses/ExpenseActions'
-import { BillForm } from '@/components/bills/BillForm'
-import { BillActions } from '@/components/bills/BillActions'
+import { SiteDetailView } from '@/components/site/SiteDetailView'
 import {
-  LayoutDashboard, Building2, Receipt, FileText, TrendingUp,
-  Wallet, CalendarDays, BookOpen, Users, BarChart2, Loader,
-  CheckCircle, XCircle, IndianRupee, PiggyBank,
+  LayoutDashboard, Building2, TrendingUp, Wallet,
+  Users, BarChart2, Loader, Plus, Pencil, Trash2,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import {
-  expensesApi, sitesApi, fundsApi, usersApi,
-  attendanceApi, ledgerApi, reportsApi, billsApi,
-  investmentsApi, organizationsApi,
+  sitesApi, fundsApi, usersApi,
+  reportsApi, investmentsApi, organizationsApi,
 } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -29,44 +25,22 @@ import {
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'overview',     label: 'Overview',     icon: LayoutDashboard },
-  { id: 'sites',        label: 'Sites',        icon: Building2 },
-  { id: 'expenses',     label: 'Expenses',     icon: Receipt },
-  { id: 'bills',        label: 'Bills',        icon: FileText },
-  { id: 'investments',  label: 'Investments',  icon: TrendingUp },
-  { id: 'funds',        label: 'Funds',        icon: Wallet },
-  { id: 'attendance',   label: 'Attendance',   icon: CalendarDays },
-  { id: 'ledger',       label: 'Ledger',       icon: BookOpen },
-  { id: 'users',        label: 'Users',        icon: Users },
-  { id: 'reports',      label: 'Reports',      icon: BarChart2 },
+  { id: 'overview',    label: 'Overview',    icon: LayoutDashboard },
+  { id: 'sites',       label: 'Sites',       icon: Building2 },
+  { id: 'investments', label: 'Investments', icon: TrendingUp },
+  { id: 'funds',       label: 'Funds',       icon: Wallet },
+  { id: 'users',       label: 'Users',       icon: Users },
+  { id: 'reports',     label: 'Reports',     icon: BarChart2 },
 ]
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
 
-const EXPENSE_STATUS = {
-  pending:  { label: 'Pending',  dot: 'bg-amber-400', text: 'text-amber-600' },
-  approved: { label: 'Approved', dot: 'bg-blue-400',  text: 'text-blue-600'  },
-  paid:     { label: 'Paid',     dot: 'bg-green-400', text: 'text-green-600' },
-  rejected: { label: 'Rejected', dot: 'bg-red-400',   text: 'text-red-500'   },
-}
-const BILL_STATUS = {
-  pending:  'bg-amber-100 text-amber-700',
-  credited: 'bg-blue-100 text-blue-700',
-  paid:     'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-}
-const ATTENDANCE_BADGE = {
-  present:  'bg-green-100 text-green-700',
-  absent:   'bg-red-100 text-red-700',
-  half_day: 'bg-amber-100 text-amber-700',
-  leave:    'bg-blue-100 text-blue-700',
-}
 const SITE_STATUS_BADGE = {
   active:    'bg-green-100 text-green-700',
   completed: 'bg-slate-100 text-slate-600',
   on_hold:   'bg-amber-100 text-amber-700',
 }
-const ROLE_LABELS   = { 1: 'Developer', 2: 'Engineer', 3: 'Supervisor', 4: 'Worker' }
+const ROLE_LABELS = { 1: 'Developer', 2: 'Engineer', 3: 'Supervisor', 4: 'Worker' }
 const ROLE_BADGE_CLS = {
   1: 'bg-purple-100 text-purple-700',
   2: 'bg-blue-100 text-blue-700',
@@ -85,16 +59,6 @@ const TODAY = new Date().toISOString().split('T')[0]
 
 // ─── Shared small components ──────────────────────────────────────────────────
 
-function StatusMeta({ status }) {
-  const s = EXPENSE_STATUS[status] || { dot: 'bg-gray-400', text: 'text-gray-500', label: status }
-  return (
-    <div className="flex items-center gap-1">
-      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-      <span className={`text-[10px] font-medium ${s.text}`}>{s.label}</span>
-    </div>
-  )
-}
-
 function TabLoader() {
   return <div className="flex justify-center py-16"><Loader className="h-6 w-6 animate-spin text-gray-300" /></div>
 }
@@ -104,7 +68,6 @@ function StatCard({ label, value, sub, color = 'blue' }) {
     blue:   'bg-blue-50 text-blue-700',
     green:  'bg-green-50 text-green-700',
     amber:  'bg-amber-50 text-amber-700',
-    slate:  'bg-slate-100 text-slate-700',
     indigo: 'bg-indigo-50 text-indigo-700',
     teal:   'bg-teal-50 text-teal-700',
     rose:   'bg-rose-50 text-rose-700',
@@ -118,32 +81,6 @@ function StatCard({ label, value, sub, color = 'blue' }) {
   )
 }
 
-// Inline approve/reject/pay action row
-function ExpenseActions_({ exp, onAction }) {
-  if (exp.status === 'pending') {
-    return (
-      <div className="px-4 pb-3 flex gap-2 flex-wrap">
-        <button onClick={() => onAction(exp, 'approve')} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold">
-          <CheckCircle className="h-3.5 w-3.5" /> Approve
-        </button>
-        <button onClick={() => onAction(exp, 'reject')} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-50 text-red-500 text-xs font-semibold">
-          <XCircle className="h-3.5 w-3.5" /> Reject
-        </button>
-      </div>
-    )
-  }
-  if (exp.status === 'approved') {
-    return (
-      <div className="px-4 pb-3 flex gap-2">
-        <button onClick={() => onAction(exp, 'pay')} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-green-50 text-green-700 text-xs font-semibold">
-          <IndianRupee className="h-3.5 w-3.5" /> Mark Paid
-        </button>
-      </div>
-    )
-  }
-  return null
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DeveloperHome() {
@@ -152,66 +89,53 @@ export default function DeveloperHome() {
   const { toast } = useToast()
 
   const [activeTab, setActiveTab] = useState('overview')
-  const [allUsers, setAllUsers] = useState([])
   const [partners, setPartners] = useState([])
-  const [sheetOpen, setSheetOpen] = useState(false)
   const [wallet, setWallet] = useState(null)
 
-  // Approval dialogs
-  const [approveExpense, setApproveExpense] = useState(null)
-  const [approveAction, setApproveAction] = useState('approve')
-  const [approveBill, setApproveBill]       = useState(null)
-  const [billAction, setBillAction]         = useState('approve')
+  // Global data
+  const [summary,        setSummary]        = useState(null)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [sites,          setSites]          = useState([])
+  const [sitesLoading,   setSitesLoading]   = useState(false)
+  const [investments,    setInvestments]    = useState([])
+  const [investSummary,  setInvestSummary]  = useState(null)
+  const [investLoading,  setInvestLoading]  = useState(false)
+  const [users,          setUsers]          = useState([])
+  const [usersLoading,   setUsersLoading]   = useState(false)
+  const [poolSummary,    setPoolSummary]    = useState(null)
+  const [reportsLoading, setReportsLoading] = useState(false)
 
-  // Per-tab state
-  const [summary,          setSummary]          = useState(null)
-  const [summaryLoading,   setSummaryLoading]   = useState(false)
-  const [sites,            setSites]            = useState([])
-  const [sitesLoading,     setSitesLoading]     = useState(false)
-  const [expenses,         setExpenses]         = useState([])
-  const [expensesLoading,  setExpensesLoading]  = useState(false)
-  const [bills,            setBills]            = useState([])
-  const [billsLoading,     setBillsLoading]     = useState(false)
-  const [investments,      setInvestments]      = useState([])
-  const [investSummary,    setInvestSummary]    = useState(null)
-  const [investLoading,    setInvestLoading]    = useState(false)
-  const [funds,            setFunds]            = useState([])
-  const [fundsLoading,     setFundsLoading]     = useState(false)
-  const [attendance,       setAttendance]       = useState([])
-  const [attendanceLoading,setAttendanceLoading]= useState(false)
-  const [ledger,           setLedger]           = useState([])
-  const [ledgerLoading,    setLedgerLoading]    = useState(false)
-  const [users,            setUsers]            = useState([])
-  const [usersLoading,     setUsersLoading]     = useState(false)
-  const [poolSummary,      setPoolSummary]      = useState(null)
-  const [reportsLoading,   setReportsLoading]   = useState(false)
+  // Sites
+  const [selectedSite, setSelectedSite] = useState(null)
+  const [siteFormOpen, setSiteFormOpen] = useState(false)
+  const [siteForm,     setSiteForm]     = useState({ name: '', address: '', description: '', status: 'active' })
 
-  useEffect(() => {
-    fundsApi.getWalletSummary().then(r => setWallet(r.data)).catch(() => {})
-  }, [])
-
-  // Forms
-  const [fundsForm, setFundsForm] = useState({ amount: '', toUserId: '', description: '', referenceNumber: '' })
-  const fundsAmountEntered = parseFloat(fundsForm.amount) > 0
-
-  const [attendanceForm, setAttendanceForm] = useState({
-    workerId: '', date: TODAY, status: 'present', hoursWorked: '8', notes: '',
-  })
-
-  const [ledgerForm, setLedgerForm] = useState({
-    amount: '', workerId: '', paymentMode: 'cash', description: '', transactionDate: TODAY,
-  })
-  const ledgerAmountEntered = parseFloat(ledgerForm.amount) > 0
-
-  const [investForm, setInvestForm] = useState({
+  // Investments sheet
+  const [sheetOpen,   setSheetOpen]   = useState(false)
+  const [investForm,  setInvestForm]  = useState({
     amount: '', partnerId: '', description: '', investmentDate: TODAY, paymentMode: 'bank_transfer', referenceNumber: '',
   })
   const investAmountEntered = parseFloat(investForm.amount) > 0
 
+  // Users sheet
+  const [userSheetOpen, setUserSheetOpen] = useState(false)
+  const [editUser,      setEditUser]      = useState(null)
+  const [userForm,      setUserForm]      = useState({ name: '', email: '', phone: '', role: '3', password: '' })
+
+  // Funds tab
+  const [funds,            setFunds]            = useState([])
+  const [fundsLoading,     setFundsLoading]     = useState(false)
+  const [walletLoadOpen,   setWalletLoadOpen]   = useState(false)
+  const [walletLoadAmount, setWalletLoadAmount] = useState('')
+  const walletLoadValid = parseFloat(walletLoadAmount) > 0
+
   // ── Bootstrap ──
 
   useEffect(() => {
-    usersApi.getAll().then(r => setAllUsers(r.data || [])).catch(() => {})
+    // Header shows developer's personal wallet balance
+    fundsApi.getWalletSummary()
+      .then(r => setWallet(r.data))
+      .catch(() => {})
     organizationsApi.getCurrent()
       .then(r => r.data?._id ? organizationsApi.getPartners(r.data._id) : null)
       .then(r => setPartners(r?.data || []))
@@ -237,20 +161,6 @@ export default function DeveloperHome() {
     finally { setSitesLoading(false) }
   }, [toast])
 
-  const loadExpenses = useCallback(async () => {
-    setExpensesLoading(true)
-    try { setExpenses((await expensesApi.getAll({ limit: 50 })).data?.expenses || []) }
-    catch { toast({ title: 'Error', description: 'Failed to load expenses', variant: 'destructive' }) }
-    finally { setExpensesLoading(false) }
-  }, [toast])
-
-  const loadBills = useCallback(async () => {
-    setBillsLoading(true)
-    try { setBills((await billsApi.getAll({ limit: 50 })).data?.bills || []) }
-    catch { toast({ title: 'Error', description: 'Failed to load bills', variant: 'destructive' }) }
-    finally { setBillsLoading(false) }
-  }, [toast])
-
   const loadInvestments = useCallback(async () => {
     setInvestLoading(true)
     try {
@@ -259,27 +169,6 @@ export default function DeveloperHome() {
       setInvestSummary(sumRes.data)
     } catch { toast({ title: 'Error', description: 'Failed to load investments', variant: 'destructive' }) }
     finally { setInvestLoading(false) }
-  }, [toast])
-
-  const loadFunds = useCallback(async () => {
-    setFundsLoading(true)
-    try { setFunds((await fundsApi.getAll({ limit: 50 })).data?.allocations || []) }
-    catch { toast({ title: 'Error', description: 'Failed to load funds', variant: 'destructive' }) }
-    finally { setFundsLoading(false) }
-  }, [toast])
-
-  const loadAttendance = useCallback(async () => {
-    setAttendanceLoading(true)
-    try { setAttendance((await attendanceApi.getAll({ limit: 50 })).data?.attendance || []) }
-    catch { toast({ title: 'Error', description: 'Failed to load attendance', variant: 'destructive' }) }
-    finally { setAttendanceLoading(false) }
-  }, [toast])
-
-  const loadLedger = useCallback(async () => {
-    setLedgerLoading(true)
-    try { setLedger((await ledgerApi.getAll({ limit: 50 })).data?.entries || []) }
-    catch { toast({ title: 'Error', description: 'Failed to load ledger', variant: 'destructive' }) }
-    finally { setLedgerLoading(false) }
   }, [toast])
 
   const loadUsers = useCallback(async () => {
@@ -299,72 +188,110 @@ export default function DeveloperHome() {
     finally { setReportsLoading(false) }
   }, [toast])
 
+  const loadFunds = useCallback(async () => {
+    setFundsLoading(true)
+    try {
+      const [fundsRes, poolRes, walletRes] = await Promise.all([
+        fundsApi.getAll({ limit: 50 }),
+        fundsApi.getInvestmentPoolSummary(),
+        fundsApi.getWalletSummary(),
+      ])
+      setFunds(fundsRes.data?.allocations || [])
+      setPoolSummary(poolRes.data)   // investment pool for Funds tab
+      setWallet(walletRes.data)      // personal wallet for header
+    } catch { toast({ title: 'Error', description: 'Failed to load funds', variant: 'destructive' }) }
+    finally { setFundsLoading(false) }
+  }, [toast])
+
   useEffect(() => {
-    const loaders = {
-      overview:    loadOverview,
-      sites:       loadSites,
-      expenses:    loadExpenses,
-      bills:       loadBills,
-      investments: loadInvestments,
-      funds:       loadFunds,
-      attendance:  loadAttendance,
-      ledger:      loadLedger,
-      users:       loadUsers,
-      reports:     loadReports,
-    }
+    const loaders = { overview: loadOverview, sites: loadSites, investments: loadInvestments, funds: loadFunds, users: loadUsers, reports: loadReports }
     loaders[activeTab]?.()
-  }, [activeTab, loadOverview, loadSites, loadExpenses, loadBills, loadInvestments,
-      loadFunds, loadAttendance, loadLedger, loadUsers, loadReports])
+    if (activeTab !== 'sites') setSelectedSite(null)
+  }, [activeTab, loadOverview, loadSites, loadInvestments, loadFunds, loadUsers, loadReports])
 
-  // ── Sheet helpers ──
+  // ── Handlers ──
 
-  const closeSheet = () => {
-    setSheetOpen(false)
-    setFundsForm({ amount: '', toUserId: '', description: '', referenceNumber: '' })
-    setAttendanceForm({ workerId: '', date: TODAY, status: 'present', hoursWorked: '8', notes: '' })
-    setLedgerForm({ amount: '', workerId: '', paymentMode: 'cash', description: '', transactionDate: TODAY })
-    setInvestForm({ amount: '', partnerId: '', description: '', investmentDate: TODAY, paymentMode: 'bank_transfer', referenceNumber: '' })
-  }
-
-  // ── Form submissions ──
-
-  const handleFundsSubmit = async (e) => {
+  const handleCreateSite = async (e) => {
     e.preventDefault()
     try {
-      await fundsApi.create({ toUserId: fundsForm.toUserId, amount: parseFloat(fundsForm.amount), description: fundsForm.description, referenceNumber: fundsForm.referenceNumber })
-      toast({ title: 'Fund allocated' }); closeSheet(); loadFunds()
-    } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
-  }
-
-  const handleAttendanceSubmit = async (e) => {
-    e.preventDefault()
-    try {
-      const hrs = attendanceForm.status === 'present' ? parseFloat(attendanceForm.hoursWorked) : attendanceForm.status === 'half_day' ? 4 : 0
-      await attendanceApi.create({ workerId: attendanceForm.workerId, date: attendanceForm.date, status: attendanceForm.status, hoursWorked: hrs, notes: attendanceForm.notes })
-      toast({ title: 'Attendance recorded' }); closeSheet(); loadAttendance()
-    } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
-  }
-
-  const handleLedgerSubmit = async (e) => {
-    e.preventDefault()
-    try {
-      await ledgerApi.create({ workerId: ledgerForm.workerId, amount: parseFloat(ledgerForm.amount), type: 'credit', paymentMode: ledgerForm.paymentMode, description: ledgerForm.description, transactionDate: ledgerForm.transactionDate })
-      toast({ title: 'Payment recorded' }); closeSheet(); loadLedger()
-    } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
+      await sitesApi.create(siteForm)
+      toast({ title: 'Site created' })
+      setSiteFormOpen(false)
+      setSiteForm({ name: '', address: '', description: '', status: 'active' })
+      loadSites()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to create site', variant: 'destructive' })
+    }
   }
 
   const handleInvestSubmit = async (e) => {
     e.preventDefault()
     try {
       await investmentsApi.create({ partnerId: investForm.partnerId, amount: parseFloat(investForm.amount), description: investForm.description, investmentDate: investForm.investmentDate, paymentMode: investForm.paymentMode, referenceNumber: investForm.referenceNumber })
-      toast({ title: 'Investment recorded' }); closeSheet(); loadInvestments()
+      toast({ title: 'Investment recorded' })
+      setSheetOpen(false)
+      setInvestForm({ amount: '', partnerId: '', description: '', investmentDate: TODAY, paymentMode: 'bank_transfer', referenceNumber: '' })
+      loadInvestments()
     } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
   }
 
-  const fabLabels = { expenses: 'Add Expense', bills: 'Add Bill', investments: 'Add Investment', funds: 'Allocate Fund', attendance: 'Mark Attendance', ledger: 'Pay Worker' }
-  const hasFab = activeTab in fabLabels
+  const openAddUser = () => {
+    setEditUser(null)
+    setUserForm({ name: '', email: '', phone: '', role: '3', password: '' })
+    setUserSheetOpen(true)
+  }
+
+  const openEditUser = (u) => {
+    setEditUser(u)
+    setUserForm({ name: u.name || '', email: u.email || '', phone: u.phone || '', role: String(u.role || 3), password: '' })
+    setUserSheetOpen(true)
+  }
+
+  const handleUserSubmit = async (e) => {
+    e.preventDefault()
+    try {
+      const payload = { name: userForm.name, email: userForm.email, phone: userForm.phone, role: parseInt(userForm.role) }
+      if (editUser) {
+        await usersApi.update(editUser._id, payload)
+        toast({ title: 'User updated' })
+      } else {
+        await usersApi.create({ ...payload, password: userForm.password })
+        toast({ title: 'User created' })
+      }
+      setUserSheetOpen(false)
+      loadUsers()
+    } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
+  }
+
+  const handleUserDelete = async (id) => {
+    try {
+      await usersApi.delete(id)
+      toast({ title: 'User deleted' })
+      loadUsers()
+    } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
+  }
+
+  const handleLoadWallet = async (e) => {
+    e.preventDefault()
+    try {
+      await fundsApi.create({ toUserId: user._id, amount: parseFloat(walletLoadAmount) })
+      toast({ title: 'Wallet loaded successfully' })
+      setWalletLoadOpen(false)
+      setWalletLoadAmount('')
+      loadFunds()
+    } catch (err) { toast({ title: 'Error', description: err.response?.data?.message || 'Failed', variant: 'destructive' }) }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
+
+  // Full-page site detail — renders outside MobileLayout so it takes the whole screen
+  if (selectedSite) {
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-50 overflow-y-auto">
+        <SiteDetailView site={selectedSite} onBack={() => setSelectedSite(null)} />
+      </div>
+    )
+  }
 
   return (
     <>
@@ -376,8 +303,8 @@ export default function DeveloperHome() {
         wallet={wallet}
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        fabLabel={hasFab ? fabLabels[activeTab] : undefined}
-        onFabClick={hasFab ? () => setSheetOpen(true) : undefined}
+        fabLabel={activeTab === 'investments' ? 'Add Investment' : activeTab === 'funds' ? 'Load Wallet' : activeTab === 'users' ? 'Add User' : undefined}
+        onFabClick={activeTab === 'investments' ? () => setSheetOpen(true) : activeTab === 'funds' ? () => setWalletLoadOpen(true) : activeTab === 'users' ? openAddUser : undefined}
       >
 
         {/* ── Overview ── */}
@@ -395,7 +322,6 @@ export default function DeveloperHome() {
                 )} color="indigo" />
               </div>
 
-              {/* Monthly trend */}
               {summary?.monthlyTrend?.length > 0 && (
                 <div className="bg-white rounded-xl overflow-hidden">
                   <p className="px-4 pt-3 pb-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Monthly Trend</p>
@@ -410,14 +336,16 @@ export default function DeveloperHome() {
                 </div>
               )}
 
-              {/* Active sites mini-list */}
+              {/* Clickable sites list */}
               {sites.length > 0 && (
                 <div className="bg-white rounded-xl overflow-hidden">
                   <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Sites</p>
                   <div className="divide-y divide-gray-100">
-                    {sites.slice(0, 4).map(site => (
-                      <FeedItem key={site._id} seed={site.name} title={site.name} subtitle={site.location || '—'}
-                        badge={{ label: site.status?.replace('_', ' ') || 'active', className: SITE_STATUS_BADGE[site.status] || 'bg-gray-100 text-gray-600' }} />
+                    {sites.slice(0, 5).map(site => (
+                      <FeedItem key={site._id} seed={site.name} title={site.name}
+                        subtitle={site.location || site.address || '—'}
+                        badge={{ label: site.status?.replace('_', ' ') || 'active', className: SITE_STATUS_BADGE[site.status] || 'bg-gray-100 text-gray-600' }}
+                        onClick={() => setSelectedSite(site)} />
                     ))}
                   </div>
                 </div>
@@ -428,85 +356,33 @@ export default function DeveloperHome() {
 
         {/* ── Sites ── */}
         {activeTab === 'sites' && (
-          sitesLoading ? <TabLoader /> :
-          sites.length === 0 ? <EmptyFeed icon={Building2} message="No sites yet" /> : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {sites.map(site => (
-                <FeedItem key={site._id} seed={site.name} title={site.name}
-                  subtitle={[site.location, site.assignedUsers?.length > 0 && `${site.assignedUsers.length} assigned`].filter(Boolean).join(' · ')}
-                  badge={{ label: site.status?.replace('_', ' ') || 'active', className: SITE_STATUS_BADGE[site.status] || 'bg-gray-100 text-gray-600' }} />
-              ))}
-            </div>
-          )
-        )}
-
-        {/* ── Expenses ── */}
-        {activeTab === 'expenses' && (
-          expensesLoading ? <TabLoader /> :
-          expenses.length === 0 ? (
-            <EmptyFeed icon={Receipt} message="No expenses yet" action={{ label: '+ Add expense', onClick: () => setSheetOpen(true) }} />
-          ) : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {expenses.map(exp => (
-                <div key={exp._id}>
-                  <FeedItem
-                    seed={exp.description || 'E'}
-                    title={exp.description || '—'}
-                    subtitle={[exp.user?.name, formatDate(exp.expenseDate)].filter(Boolean).join(' · ')}
-                    meta={<StatusMeta status={exp.status} />}
-                    amount={formatCurrency(exp.requestedAmount || exp.amount)}
-                  />
-                  <ExpenseActions_ exp={exp} onAction={(e, a) => { setApproveExpense(e); setApproveAction(a) }} />
-                </div>
-              ))}
-            </div>
-          )
-        )}
-
-        {/* ── Bills ── */}
-        {activeTab === 'bills' && (
-          billsLoading ? <TabLoader /> :
-          bills.length === 0 ? (
-            <EmptyFeed icon={FileText} message="No bills yet" action={{ label: '+ Add bill', onClick: () => setSheetOpen(true) }} />
-          ) : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {bills.map(bill => (
-                <div key={bill._id}>
-                  <FeedItem
-                    seed={bill.vendorName || 'B'}
-                    title={bill.vendorName || '—'}
-                    subtitle={[bill.invoiceNumber, formatDate(bill.billDate)].filter(Boolean).join(' · ')}
-                    amount={formatCurrency(bill.totalAmount)}
-                    badge={{ label: bill.status, className: BILL_STATUS[bill.status] || 'bg-gray-100 text-gray-600' }}
-                  />
-                  {bill.status === 'pending' && (
-                    <div className="px-4 pb-3 flex gap-2">
-                      <button onClick={() => { setApproveBill(bill); setBillAction('approve') }} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold">
-                        <CheckCircle className="h-3.5 w-3.5" /> Approve
-                      </button>
-                      <button onClick={() => { setApproveBill(bill); setBillAction('reject') }} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-50 text-red-500 text-xs font-semibold">
-                        <XCircle className="h-3.5 w-3.5" /> Reject
-                      </button>
-                    </div>
-                  )}
-                  {bill.status === 'credited' && (
-                    <div className="px-4 pb-3">
-                      <button onClick={() => { setApproveBill(bill); setBillAction('pay') }} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-green-50 text-green-700 text-xs font-semibold">
-                        <IndianRupee className="h-3.5 w-3.5" /> Mark Paid
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )
+          <div className="relative min-h-full">
+            {sitesLoading ? <TabLoader /> :
+              sites.length === 0
+                ? <EmptyFeed icon={Building2} message="No sites yet" action={{ label: '+ Add Site', onClick: () => setSiteFormOpen(true) }} />
+                : <div className="divide-y divide-gray-100 bg-white pb-24">
+                    {sites.map(site => (
+                      <FeedItem key={site._id} seed={site.name} title={site.name}
+                        subtitle={[site.location || site.address, site.assignedUsers?.length > 0 && `${site.assignedUsers.length} members`].filter(Boolean).join(' · ')}
+                        badge={{ label: site.status?.replace('_', ' ') || 'active', className: SITE_STATUS_BADGE[site.status] || 'bg-gray-100 text-gray-600' }}
+                        onClick={() => setSelectedSite(site)} />
+                    ))}
+                  </div>
+            }
+            <button
+              onClick={() => setSiteFormOpen(true)}
+              className="fixed bottom-24 right-4 z-30 h-14 w-14 flex items-center justify-center bg-teal-600 hover:bg-teal-700 text-white rounded-full shadow-lg"
+              aria-label="Add Site"
+            >
+              <Plus className="h-6 w-6" />
+            </button>
+          </div>
         )}
 
         {/* ── Investments ── */}
         {activeTab === 'investments' && (
           investLoading ? <TabLoader /> : (
             <>
-              {/* Summary strip */}
               {investSummary && (
                 <div className="p-4 grid grid-cols-2 gap-3">
                   <StatCard label="Total Invested" value={formatCurrency(investSummary.totalInvested || 0)} color="teal" />
@@ -515,111 +391,96 @@ export default function DeveloperHome() {
                   <StatCard label="Partners" value={String(investSummary.partnerCount || partners.length || 0)} color="indigo" />
                 </div>
               )}
-              {investments.length === 0 ? (
-                <EmptyFeed icon={TrendingUp} message="No investments yet" action={{ label: '+ Add investment', onClick: () => setSheetOpen(true) }} />
-              ) : (
-                <div className="divide-y divide-gray-100 bg-white">
-                  {investments.map(inv => {
-                    const name = inv.partner?.name || '—'
-                    return (
-                      <FeedItem
-                        key={inv._id}
-                        seed={name}
-                        title={name}
-                        subtitle={[formatDate(inv.investmentDate), inv.paymentMode?.replace('_', ' ')].filter(Boolean).join(' · ')}
-                        amount={`${inv.type === 'withdrawal' ? '−' : '+'}${formatCurrency(inv.amount)}`}
-                        amountClass={inv.type === 'withdrawal' ? 'text-red-500' : 'text-green-600'}
-                      />
-                    )
-                  })}
-                </div>
-              )}
+              {investments.length === 0
+                ? <EmptyFeed icon={TrendingUp} message="No investments yet" action={{ label: '+ Add investment', onClick: () => setSheetOpen(true) }} />
+                : <div className="divide-y divide-gray-100 bg-white">
+                    {investments.map(inv => {
+                      const name = inv.partner?.name || '—'
+                      return (
+                        <FeedItem key={inv._id} seed={name} title={name}
+                          subtitle={[formatDate(inv.investmentDate), inv.paymentMode?.replace('_', ' ')].filter(Boolean).join(' · ')}
+                          amount={`${inv.type === 'withdrawal' ? '−' : '+'}${formatCurrency(inv.amount)}`}
+                          amountClass={inv.type === 'withdrawal' ? 'text-red-500' : 'text-green-600'} />
+                      )
+                    })}
+                  </div>
+              }
             </>
           )
         )}
 
         {/* ── Funds ── */}
         {activeTab === 'funds' && (
-          fundsLoading ? <TabLoader /> :
-          funds.length === 0 ? (
-            <EmptyFeed icon={Wallet} message="No fund allocations yet" action={{ label: '+ Allocate fund', onClick: () => setSheetOpen(true) }} />
-          ) : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {funds.map(fund => {
-                const name = fund.toUser?.name || '—'
-                return (
-                  <FeedItem
-                    key={fund._id}
-                    seed={name}
-                    title={name}
-                    subtitle={[fund.fromUser?.name && `From: ${fund.fromUser.name}`, formatDate(fund.allocationDate || fund.createdAt)].filter(Boolean).join(' · ')}
-                    amount={formatCurrency(fund.amount)}
-                    badge={{ label: fund.status, className: fund.status === 'disbursed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700' }}
-                  />
-                )
-              })}
-            </div>
-          )
-        )}
-
-        {/* ── Attendance ── */}
-        {activeTab === 'attendance' && (
-          attendanceLoading ? <TabLoader /> :
-          attendance.length === 0 ? (
-            <EmptyFeed icon={CalendarDays} message="No attendance records" action={{ label: '+ Mark attendance', onClick: () => setSheetOpen(true) }} />
-          ) : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {attendance.map(rec => {
-                const name = rec.worker?.name || '—'
-                return (
-                  <FeedItem key={rec._id} seed={name} title={name}
-                    subtitle={[formatDate(rec.date), rec.hoursWorked > 0 && `${rec.hoursWorked}h`].filter(Boolean).join(' · ')}
-                    badge={{ label: rec.status?.replace('_', ' '), className: ATTENDANCE_BADGE[rec.status] || 'bg-gray-100 text-gray-600' }} />
-                )
-              })}
-            </div>
-          )
-        )}
-
-        {/* ── Ledger ── */}
-        {activeTab === 'ledger' && (
-          ledgerLoading ? <TabLoader /> :
-          ledger.length === 0 ? (
-            <EmptyFeed icon={BookOpen} message="No payments recorded" action={{ label: '+ Record payment', onClick: () => setSheetOpen(true) }} />
-          ) : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {ledger.map(entry => {
-                const name = entry.worker?.name || '—'
-                return (
-                  <FeedItem key={entry._id} seed={name} title={name}
-                    subtitle={[formatDate(entry.transactionDate), entry.paymentMode?.replace('_', ' ')].filter(Boolean).join(' · ')}
-                    amount={`${entry.type === 'credit' ? '+' : '−'}${formatCurrency(entry.amount)}`}
-                    amountClass={entry.type === 'credit' ? 'text-green-600' : 'text-red-500'} />
-                )
-              })}
-            </div>
+          fundsLoading ? <TabLoader /> : (
+            <>
+              <div className="p-4 space-y-3">
+                <div className="bg-blue-600 rounded-2xl p-5 text-white">
+                  <p className="text-xs font-medium opacity-70">Investment Pool Available</p>
+                  <p className="text-3xl font-bold mt-1">{formatCurrency(poolSummary?.availablePool ?? poolSummary?.availableBalance ?? 0)}</p>
+                  <div className="flex gap-4 mt-3 text-xs opacity-80">
+                    <span>Total: {formatCurrency(poolSummary?.totalInvestment || poolSummary?.totalInvested || 0)}</span>
+                    <span>Allocated: {formatCurrency(poolSummary?.totalAllocated || 0)}</span>
+                  </div>
+                </div>
+                <div className="bg-green-600 rounded-2xl p-5 text-white">
+                  <p className="text-xs font-medium opacity-70">My Wallet</p>
+                  <p className="text-3xl font-bold mt-1">{formatCurrency(wallet?.remainingBalance || 0)}</p>
+                  <div className="flex gap-4 mt-3 text-xs opacity-80">
+                    <span>Received: {formatCurrency(wallet?.totalReceived || 0)}</span>
+                    <span>Spent: {formatCurrency(wallet?.totalSpent || 0)}</span>
+                  </div>
+                </div>
+              </div>
+              {funds.length === 0
+                ? <EmptyFeed icon={Wallet} message="No wallet loads yet" action={{ label: '+ Load Wallet', onClick: () => setWalletLoadOpen(true) }} />
+                : <div className="divide-y divide-gray-100 bg-white pb-24">
+                    {funds.map(fund => {
+                      const name = fund.toUser?.name || '—'
+                      return (
+                        <FeedItem key={fund._id} seed={name} title={name}
+                          subtitle={formatDate(fund.allocationDate || fund.createdAt)}
+                          amount={formatCurrency(fund.amount)}
+                          badge={{ label: fund.status, className: fund.status === 'disbursed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700' }} />
+                      )
+                    })}
+                  </div>
+              }
+            </>
           )
         )}
 
         {/* ── Users ── */}
         {activeTab === 'users' && (
           usersLoading ? <TabLoader /> :
-          users.length === 0 ? <EmptyFeed icon={Users} message="No users found" /> : (
-            <div className="divide-y divide-gray-100 bg-white">
-              {users.map(u => (
-                <FeedItem key={u._id} seed={u.name} title={u.name}
-                  subtitle={u.email || u.phone || '—'}
-                  badge={{ label: ROLE_LABELS[u.role] || `Role ${u.role}`, className: ROLE_BADGE_CLS[u.role] || 'bg-gray-100 text-gray-600' }} />
-              ))}
-            </div>
-          )
+          users.length === 0
+            ? <EmptyFeed icon={Users} message="No users found" action={{ label: '+ Add User', onClick: openAddUser }} />
+            : (
+              <div className="divide-y divide-gray-100 bg-white pb-24">
+                {users.map(u => (
+                  <div key={u._id} className="flex items-center pr-2">
+                    <div className="flex-1 min-w-0">
+                      <FeedItem seed={u.name} title={u.name}
+                        subtitle={u.email || u.phone || '—'}
+                        badge={{ label: ROLE_LABELS[u.role] || `Role ${u.role}`, className: ROLE_BADGE_CLS[u.role] || 'bg-gray-100 text-gray-600' }} />
+                    </div>
+                    <div className="shrink-0 flex gap-0.5">
+                      <button onClick={() => openEditUser(u)} className="p-2 text-blue-400 hover:text-blue-600 rounded-full hover:bg-blue-50">
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button onClick={() => handleUserDelete(u._id)} className="p-2 text-red-400 hover:text-red-600 rounded-full hover:bg-red-50">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
         )}
 
         {/* ── Reports ── */}
         {activeTab === 'reports' && (
           reportsLoading ? <TabLoader /> : (
             <div className="p-4 space-y-4">
-              {/* Expense stats */}
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Expenses</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -630,7 +491,6 @@ export default function DeveloperHome() {
                 </div>
               </div>
 
-              {/* Investment pool */}
               {poolSummary && (
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Investment Pool</p>
@@ -642,7 +502,6 @@ export default function DeveloperHome() {
                 </div>
               )}
 
-              {/* Monthly trend */}
               {summary?.monthlyTrend?.length > 0 && (
                 <div className="bg-white rounded-xl overflow-hidden">
                   <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">Monthly Expenses</p>
@@ -666,7 +525,6 @@ export default function DeveloperHome() {
                 </div>
               )}
 
-              {/* Per-site breakdown */}
               {summary?.siteBreakdown?.length > 0 && (
                 <div className="bg-white rounded-xl overflow-hidden">
                   <p className="px-4 pt-3 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">By Site</p>
@@ -684,222 +542,202 @@ export default function DeveloperHome() {
           )
         )}
 
-        {/* ── Bottom Sheet ── */}
-        <Sheet open={sheetOpen} onOpenChange={(open) => { if (!open) closeSheet() }}>
+        {/* ── Create Site Sheet ── */}
+        <Sheet open={siteFormOpen} onOpenChange={(open) => { if (!open) { setSiteFormOpen(false); setSiteForm({ name: '', address: '', description: '', status: 'active' }) } }}>
           <SheetContent side="bottom" className="rounded-t-2xl max-h-[90vh] overflow-y-auto px-0 pb-safe">
             <div className="px-5 pt-2 pb-6">
               <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
-              <h2 className="text-lg font-bold text-gray-900 mb-4">{fabLabels[activeTab]}</h2>
-
-              {activeTab === 'expenses' && (
-                <ExpenseForm onSuccess={() => { closeSheet(); toast({ title: 'Expense submitted!' }); loadExpenses() }} onCancel={closeSheet} />
-              )}
-
-              {activeTab === 'bills' && (
-                <BillForm onSuccess={() => { closeSheet(); toast({ title: 'Bill added!' }); loadBills() }} onCancel={closeSheet} />
-              )}
-
-              {activeTab === 'investments' && (
-                <form onSubmit={handleInvestSubmit} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Amount (₹) *</Label>
-                    <Input type="number" placeholder="e.g. 100000" autoFocus value={investForm.amount} onChange={e => setInvestForm(p => ({ ...p, amount: e.target.value }))} min="0" required />
-                  </div>
-                  {investAmountEntered && (
-                    <>
-                      {partners.length > 0 && (
-                        <div className="space-y-1.5">
-                          <Label>Partner *</Label>
-                          <Select value={investForm.partnerId} onValueChange={v => setInvestForm(p => ({ ...p, partnerId: v }))} required>
-                            <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
-                            <SelectContent>
-                              {partners.map(pt => <SelectItem key={pt._id} value={pt._id}>{pt.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Payment Mode</Label>
-                          <Select value={investForm.paymentMode} onValueChange={v => setInvestForm(p => ({ ...p, paymentMode: v }))}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {PAYMENT_MODES.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Date</Label>
-                          <Input type="date" value={investForm.investmentDate} onChange={e => setInvestForm(p => ({ ...p, investmentDate: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Reference #</Label>
-                        <Input placeholder="e.g. TRF-001" value={investForm.referenceNumber} onChange={e => setInvestForm(p => ({ ...p, referenceNumber: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Description</Label>
-                        <Input placeholder="Optional note" value={investForm.description} onChange={e => setInvestForm(p => ({ ...p, description: e.target.value }))} />
-                      </div>
-                    </>
-                  )}
-                  <div className="flex gap-2 pt-2">
-                    <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={!investAmountEntered}>Record</Button>
-                    <Button type="button" variant="outline" onClick={closeSheet}>Cancel</Button>
-                  </div>
-                </form>
-              )}
-
-              {activeTab === 'funds' && (
-                <form onSubmit={handleFundsSubmit} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Amount (₹) *</Label>
-                    <Input type="number" placeholder="e.g. 50000" autoFocus value={fundsForm.amount} onChange={e => setFundsForm(p => ({ ...p, amount: e.target.value }))} min="0" required />
-                  </div>
-                  {fundsAmountEntered && (
-                    <>
-                      <div className="space-y-1.5">
-                        <Label>Allocate To *</Label>
-                        <Select value={fundsForm.toUserId} onValueChange={v => setFundsForm(p => ({ ...p, toUserId: v }))} required>
-                          <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
-                          <SelectContent>
-                            {allUsers.filter(u => u._id !== user?._id).map(u => <SelectItem key={u._id} value={u._id}>{u.name} ({ROLE_LABELS[u.role]})</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Reference #</Label>
-                        <Input placeholder="e.g. TRF-001" value={fundsForm.referenceNumber} onChange={e => setFundsForm(p => ({ ...p, referenceNumber: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Description</Label>
-                        <Input placeholder="Optional" value={fundsForm.description} onChange={e => setFundsForm(p => ({ ...p, description: e.target.value }))} />
-                      </div>
-                    </>
-                  )}
-                  <div className="flex gap-2 pt-2">
-                    <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={!fundsAmountEntered || !fundsForm.toUserId}>Allocate</Button>
-                    <Button type="button" variant="outline" onClick={closeSheet}>Cancel</Button>
-                  </div>
-                </form>
-              )}
-
-              {activeTab === 'attendance' && (
-                <form onSubmit={handleAttendanceSubmit} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Worker *</Label>
-                    <Select value={attendanceForm.workerId} onValueChange={v => setAttendanceForm(p => ({ ...p, workerId: v }))} required>
-                      <SelectTrigger><SelectValue placeholder="Select worker" /></SelectTrigger>
-                      <SelectContent>
-                        {allUsers.filter(u => u.role === 4).map(w => <SelectItem key={w._id} value={w._id}>{w.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
+              <h2 className="text-lg font-bold text-gray-900 mb-4">Create New Site</h2>
+              <form onSubmit={handleCreateSite} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Site Name *</Label>
+                  <Input autoFocus placeholder="e.g. Sunrise Apartments Block A"
+                    value={siteForm.name} onChange={e => setSiteForm(p => ({ ...p, name: e.target.value }))} required />
+                </div>
+                {siteForm.name.trim().length > 0 && (
+                  <>
                     <div className="space-y-1.5">
-                      <Label>Status *</Label>
-                      <Select value={attendanceForm.status} onValueChange={v => setAttendanceForm(p => ({ ...p, status: v }))}>
+                      <Label>Location / Address</Label>
+                      <Input placeholder="e.g. 123 Main Road, Surat"
+                        value={siteForm.address} onChange={e => setSiteForm(p => ({ ...p, address: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Description</Label>
+                      <Textarea placeholder="e.g. Residential complex – 20 units" rows={2}
+                        value={siteForm.description} onChange={e => setSiteForm(p => ({ ...p, description: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Status</Label>
+                      <Select value={siteForm.status} onValueChange={v => setSiteForm(p => ({ ...p, status: v }))}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="present">Present</SelectItem>
-                          <SelectItem value="absent">Absent</SelectItem>
-                          <SelectItem value="half_day">Half Day</SelectItem>
-                          <SelectItem value="leave">Leave</SelectItem>
+                          <SelectItem value="active">🟢 Active</SelectItem>
+                          <SelectItem value="on_hold">🟡 On Hold</SelectItem>
+                          <SelectItem value="completed">🔵 Completed</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label>Date *</Label>
-                      <Input type="date" value={attendanceForm.date} onChange={e => setAttendanceForm(p => ({ ...p, date: e.target.value }))} required />
-                    </div>
-                  </div>
-                  {attendanceForm.status === 'present' && (
-                    <div className="space-y-1.5">
-                      <Label>Hours Worked</Label>
-                      <Input type="number" value={attendanceForm.hoursWorked} onChange={e => setAttendanceForm(p => ({ ...p, hoursWorked: e.target.value }))} min="0" max="24" step="0.5" />
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    <Label>Notes</Label>
-                    <Input placeholder="Optional" value={attendanceForm.notes} onChange={e => setAttendanceForm(p => ({ ...p, notes: e.target.value }))} />
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={!attendanceForm.workerId}>Save</Button>
-                    <Button type="button" variant="outline" onClick={closeSheet}>Cancel</Button>
-                  </div>
-                </form>
-              )}
-
-              {activeTab === 'ledger' && (
-                <form onSubmit={handleLedgerSubmit} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Amount (₹) *</Label>
-                    <Input type="number" placeholder="e.g. 2500" autoFocus value={ledgerForm.amount} onChange={e => setLedgerForm(p => ({ ...p, amount: e.target.value }))} min="0" required />
-                  </div>
-                  {ledgerAmountEntered && (
-                    <>
-                      <div className="space-y-1.5">
-                        <Label>Worker *</Label>
-                        <Select value={ledgerForm.workerId} onValueChange={v => setLedgerForm(p => ({ ...p, workerId: v }))} required>
-                          <SelectTrigger><SelectValue placeholder="Select worker" /></SelectTrigger>
-                          <SelectContent>
-                            {allUsers.filter(u => u.role === 4).map(w => <SelectItem key={w._id} value={w._id}>{w.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Payment Mode</Label>
-                          <Select value={ledgerForm.paymentMode} onValueChange={v => setLedgerForm(p => ({ ...p, paymentMode: v }))}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {PAYMENT_MODES.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Date</Label>
-                          <Input type="date" value={ledgerForm.transactionDate} onChange={e => setLedgerForm(p => ({ ...p, transactionDate: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Note</Label>
-                        <Input placeholder="e.g. Weekly wages" value={ledgerForm.description} onChange={e => setLedgerForm(p => ({ ...p, description: e.target.value }))} />
-                      </div>
-                    </>
-                  )}
-                  <div className="flex gap-2 pt-2">
-                    <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={!ledgerAmountEntered || !ledgerForm.workerId}>Save</Button>
-                    <Button type="button" variant="outline" onClick={closeSheet}>Cancel</Button>
-                  </div>
-                </form>
-              )}
+                  </>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <Button type="submit" className="flex-1 bg-teal-600 hover:bg-teal-700" disabled={!siteForm.name.trim()}>
+                    Create Site
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setSiteFormOpen(false)}>Cancel</Button>
+                </div>
+              </form>
             </div>
           </SheetContent>
         </Sheet>
+
+        {/* ── Investment Sheet ── */}
+        <Sheet open={sheetOpen} onOpenChange={(open) => { if (!open) setSheetOpen(false) }}>
+          <SheetContent side="bottom" className="rounded-t-2xl max-h-[90vh] overflow-y-auto px-0 pb-safe">
+            <div className="px-5 pt-2 pb-6">
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+              <h2 className="text-lg font-bold text-gray-900 mb-4">Add Investment</h2>
+              <form onSubmit={handleInvestSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Amount (₹) *</Label>
+                  <Input type="number" placeholder="e.g. 100000" autoFocus value={investForm.amount}
+                    onChange={e => setInvestForm(p => ({ ...p, amount: e.target.value }))} min="0" required />
+                </div>
+                {investAmountEntered && (
+                  <>
+                    {partners.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label>Partner *</Label>
+                        <Select value={investForm.partnerId} onValueChange={v => setInvestForm(p => ({ ...p, partnerId: v }))}>
+                          <SelectTrigger><SelectValue placeholder="Select partner" /></SelectTrigger>
+                          <SelectContent>
+                            {partners.map(pt => <SelectItem key={pt._id} value={pt._id}>{pt.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label>Payment Mode</Label>
+                        <Select value={investForm.paymentMode} onValueChange={v => setInvestForm(p => ({ ...p, paymentMode: v }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {PAYMENT_MODES.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Date</Label>
+                        <Input type="date" value={investForm.investmentDate}
+                          onChange={e => setInvestForm(p => ({ ...p, investmentDate: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Reference #</Label>
+                      <Input placeholder="e.g. TRF-001" value={investForm.referenceNumber}
+                        onChange={e => setInvestForm(p => ({ ...p, referenceNumber: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Description</Label>
+                      <Input placeholder="Optional note" value={investForm.description}
+                        onChange={e => setInvestForm(p => ({ ...p, description: e.target.value }))} />
+                    </div>
+                  </>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={!investAmountEntered}>Record</Button>
+                  <Button type="button" variant="outline" onClick={() => setSheetOpen(false)}>Cancel</Button>
+                </div>
+              </form>
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* ── Load Wallet Sheet ── */}
+        <Sheet open={walletLoadOpen} onOpenChange={(open) => { if (!open) { setWalletLoadOpen(false); setWalletLoadAmount('') } }}>
+          <SheetContent side="bottom" className="rounded-t-2xl max-h-[90vh] overflow-y-auto px-0 pb-safe">
+            <div className="px-5 pt-2 pb-6">
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+              <h2 className="text-lg font-bold text-gray-900 mb-1">Load My Wallet</h2>
+              {poolSummary?.availablePool != null && (
+                <p className="text-sm text-gray-400 mb-4">Pool Available: <span className="font-semibold text-gray-700">{formatCurrency(poolSummary.availablePool)}</span></p>
+              )}
+              <form onSubmit={handleLoadWallet} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Amount (₹) *</Label>
+                  <Input type="number" placeholder="e.g. 50000" autoFocus value={walletLoadAmount}
+                    onChange={e => setWalletLoadAmount(e.target.value)} min="0" required />
+                </div>
+                {walletLoadValid && poolSummary?.availablePool != null && parseFloat(walletLoadAmount) > poolSummary.availablePool && (
+                  <p className="text-xs text-red-500">Amount exceeds available pool balance</p>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700"
+                    disabled={!walletLoadValid || (poolSummary?.availablePool != null && parseFloat(walletLoadAmount) > poolSummary.availablePool)}>
+                    Load to My Wallet
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => { setWalletLoadOpen(false); setWalletLoadAmount('') }}>Cancel</Button>
+                </div>
+              </form>
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* ── User Sheet ── */}
+        <Sheet open={userSheetOpen} onOpenChange={(open) => { if (!open) setUserSheetOpen(false) }}>
+          <SheetContent side="bottom" className="rounded-t-2xl max-h-[90vh] overflow-y-auto px-0 pb-safe">
+            <div className="px-5 pt-2 pb-6">
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+              <h2 className="text-lg font-bold text-gray-900 mb-4">{editUser ? 'Edit User' : 'Add User'}</h2>
+              <form onSubmit={handleUserSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>Name *</Label>
+                  <Input autoFocus placeholder="e.g. Ramesh Kumar"
+                    value={userForm.name} onChange={e => setUserForm(p => ({ ...p, name: e.target.value }))} required />
+                </div>
+                {userForm.name.trim().length > 0 && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label>Email</Label>
+                      <Input type="email" placeholder="e.g. ramesh@example.com"
+                        value={userForm.email} onChange={e => setUserForm(p => ({ ...p, email: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Phone</Label>
+                      <Input type="tel" placeholder="e.g. 9876543210"
+                        value={userForm.phone} onChange={e => setUserForm(p => ({ ...p, phone: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Role *</Label>
+                      <Select value={userForm.role} onValueChange={v => setUserForm(p => ({ ...p, role: v }))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="2">Engineer</SelectItem>
+                          <SelectItem value="3">Supervisor</SelectItem>
+                          <SelectItem value="4">Worker</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {!editUser && (
+                      <div className="space-y-1.5">
+                        <Label>Password *</Label>
+                        <Input type="password" placeholder="Set initial password"
+                          value={userForm.password} onChange={e => setUserForm(p => ({ ...p, password: e.target.value }))} required />
+                      </div>
+                    )}
+                  </>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={!userForm.name.trim()}>
+                    {editUser ? 'Save Changes' : 'Create User'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setUserSheetOpen(false)}>Cancel</Button>
+                </div>
+              </form>
+            </div>
+          </SheetContent>
+        </Sheet>
+
       </MobileLayout>
-
-      {/* Expense approve/reject/pay dialog */}
-      {approveExpense && (
-        <ExpenseActions
-          expense={approveExpense}
-          isOpen={!!approveExpense}
-          onClose={() => setApproveExpense(null)}
-          onSuccess={() => { setApproveExpense(null); loadExpenses() }}
-          action={approveAction}
-        />
-      )}
-
-      {/* Bill approve/reject/pay dialog */}
-      {approveBill && (
-        <BillActions
-          bill={approveBill}
-          isOpen={!!approveBill}
-          onClose={() => setApproveBill(null)}
-          onSuccess={() => { setApproveBill(null); loadBills() }}
-          action={billAction}
-        />
-      )}
     </>
   )
 }

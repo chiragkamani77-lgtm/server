@@ -43,7 +43,8 @@ const STATUS_COLORS = {
 }
 
 export default function Bills() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isEngineer } = useAuth()
+  const canManage = isAdmin || isEngineer
   const { toast } = useToast()
   const loadingStates = useLoading()
 
@@ -63,7 +64,6 @@ export default function Bills() {
 
   const [form, setForm] = useState({
     siteId: '',
-    fundAllocationId: '',
     vendorName: '',
     invoiceNumber: '',
     billDate: new Date().toISOString().split('T')[0],
@@ -122,7 +122,6 @@ export default function Bills() {
     await loadingStates.withCreating(async () => {
       const billData = {
         siteId: form.siteId || null,
-        fundAllocationId: form.fundAllocationId || null,
         vendorName: form.vendorName,
         invoiceNumber: form.invoiceNumber,
         billDate: form.billDate,
@@ -162,7 +161,7 @@ export default function Bills() {
   const handleEdit = (bill) => {
     const totalAmount = bill.totalAmount || (parseFloat(bill.baseAmount) + parseFloat(bill.gstAmount))
     setForm({
-      fundAllocationId: bill.fundAllocation?._id || '',
+      siteId: bill.site?._id || '',
       vendorName: bill.vendorName,
       invoiceNumber: bill.invoiceNumber || '',
       billDate: bill.billDate.split('T')[0],
@@ -190,7 +189,6 @@ export default function Bills() {
   const resetForm = () => {
     setForm({
       siteId: '',
-      fundAllocationId: '',
       vendorName: '',
       invoiceNumber: '',
       billDate: new Date().toISOString().split('T')[0],
@@ -352,7 +350,7 @@ export default function Bills() {
                         ? <span className="text-[10px] text-gray-500">...</span>
                         : <Upload className="h-4 w-4" />}
                     </label>
-                    {isAdmin && bill.status === 'pending' && (
+                    {canManage && bill.status === 'pending' && (
                       <ActionBtn
                         onClick={() => handleStatusUpdate(bill._id, 'credited')}
                         title="Mark Credited"
@@ -361,7 +359,7 @@ export default function Bills() {
                       />
                     )}
                     <ActionBtn onClick={() => handleEdit(bill)} title="Edit" icon={Edit} hoverClass="hover:text-indigo-600 hover:bg-indigo-50" />
-                    {isAdmin && (
+                    {canManage && (
                       <ActionBtn
                         onClick={() => handleDelete(bill._id)}
                         title="Delete"
@@ -388,75 +386,18 @@ export default function Bills() {
       <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
         <SheetContent title={editingId ? 'Edit Bill' : 'Add New Bill'}>
           <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
-            {/* Vendor quick select */}
-            {vendorSuggestions.length > 0 && !editingId && (
-              <div className="space-y-1">
-                <Label className="text-xs text-gray-500">Recent Suppliers</Label>
-                <Select onValueChange={(v) => setForm((f) => ({ ...f, vendorName: v }))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Pick a previous supplier..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vendorSuggestions.map((v) => (
-                      <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {isAdmin && sites.length > 0 && (
-              <div className="space-y-1">
-                <Label>Site (Optional)</Label>
-                <Select
-                  value={form.siteId || 'none'}
-                  onValueChange={(v) => setForm({ ...form, siteId: v === 'none' ? '' : v })}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select site" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map((s) => (
-                      <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <Label>Supplier / Vendor Name *</Label>
-              <Input value={form.vendorName} onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
-                placeholder="e.g. ABC Steel Traders" required />
-            </div>
-
+            {/* Amount first */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label>Invoice Number</Label>
-                <Input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })}
-                  placeholder="INV-001" />
-              </div>
-              <div className="space-y-1">
-                <Label>Bill Date *</Label>
-                <Input type="date" value={form.billDate}
-                  onChange={(e) => setForm({ ...form, billDate: e.target.value })} required />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Total Amount (with GST) *</Label>
+                <Label>Total Amount ₹ *</Label>
                 <Input type="number" value={form.totalAmount}
                   onChange={(e) => handleTotalAmountChange(e.target.value)}
-                  placeholder="11800" required min="0" />
+                  placeholder="e.g. 11800" required min="0" autoFocus />
               </div>
               <div className="space-y-1">
                 <Label>GST Rate</Label>
                 <Select value={form.gstRate.toString()} onValueChange={(v) => handleGstRateChange(parseInt(v))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {GST_RATES.map((r) => (
                       <SelectItem key={r.value} value={r.value.toString()}>{r.label}</SelectItem>
@@ -466,6 +407,7 @@ export default function Bills() {
               </div>
             </div>
 
+            {/* GST breakdown — shown as soon as amount is entered */}
             {form.totalAmount && (
               <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-3 grid grid-cols-2 gap-2 text-sm">
                 <div>
@@ -479,22 +421,79 @@ export default function Bills() {
               </div>
             )}
 
-            <FundAllocationSelector
-              value={form.fundAllocationId}
-              onChange={(v) => setForm({ ...form, fundAllocationId: v })}
-              siteId={form.siteId || undefined}
-              requestedAmount={parseFloat(form.totalAmount || 0)}
-              required={false}
-              label="Link to Fund (Optional)"
-            />
+            {/* Wallet balance — auto, no dropdown */}
+            {form.totalAmount && (
+              <FundAllocationSelector requestedAmount={parseFloat(form.totalAmount || 0)} />
+            )}
 
-            <div className="space-y-1">
-              <Label>What is this bill for?</Label>
-              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="e.g. Steel rods - 2 tons for Block A" rows={2} />
-            </div>
+            {/* Remaining fields visible after amount entered */}
+            {form.totalAmount && (
+              <>
+                {/* Vendor quick select */}
+                {vendorSuggestions.length > 0 && !editingId && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-500">Recent Suppliers</Label>
+                    <Select onValueChange={(v) => setForm((f) => ({ ...f, vendorName: v }))}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Pick a previous supplier..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {vendorSuggestions.map((v) => (
+                          <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
-            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 h-11 text-base" disabled={loadingStates.creating}>
+                <div className="space-y-1">
+                  <Label>Supplier / Vendor Name *</Label>
+                  <Input value={form.vendorName} onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
+                    placeholder="e.g. ABC Steel Traders" required />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Invoice Number</Label>
+                    <Input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })}
+                      placeholder="INV-001" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Bill Date *</Label>
+                    <Input type="date" value={form.billDate}
+                      onChange={(e) => setForm({ ...form, billDate: e.target.value })} required />
+                  </div>
+                </div>
+
+                {isAdmin && sites.length > 0 && (
+                  <div className="space-y-1">
+                    <Label>Site (Optional)</Label>
+                    <Select
+                      value={form.siteId || 'none'}
+                      onValueChange={(v) => setForm({ ...form, siteId: v === 'none' ? '' : v })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select site" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No specific site</SelectItem>
+                        {sites.map((s) => (
+                          <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <Label>What is this bill for?</Label>
+                  <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    placeholder="e.g. Steel rods - 2 tons for Block A" rows={2} />
+                </div>
+              </>
+            )}
+
+            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 h-11 text-base" disabled={loadingStates.creating || !form.totalAmount}>
               {loadingStates.creating ? 'Saving...' : editingId ? 'Update Bill' : 'Add Bill'}
             </Button>
           </form>
@@ -554,7 +553,7 @@ export default function Bills() {
                 </a>
               )}
 
-              {isAdmin && viewBill.status === 'pending' && (
+              {canManage && viewBill.status === 'pending' && (
                 <div className="flex gap-2 pt-2">
                   <Button className="flex-1 bg-blue-600 hover:bg-blue-700 h-11" size="sm"
                     onClick={() => { handleStatusUpdate(viewBill._id, 'credited'); setViewBill(null) }}>

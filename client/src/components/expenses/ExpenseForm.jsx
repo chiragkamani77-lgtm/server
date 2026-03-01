@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatCurrency } from '@/lib/utils'
 import { Loader, Wallet } from 'lucide-react'
 
-export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel }) {
+export function ExpenseForm({ expense = null, siteId = null, hideSite = false, onSuccess, onCancel }) {
   const { isAdmin } = useAuth()
   const isEditing = Boolean(expense)
 
@@ -119,8 +119,8 @@ export function ExpenseForm({ expense = null, siteId = null, onSuccess, onCancel
         </div>
       )}
 
-      {/* Site — admin selects, non-admin auto-detected */}
-      {isAdmin ? (
+      {/* Site — admin selects (hidden when pre-filled from site context) */}
+      {isAdmin && !hideSite ? (
         <div className="space-y-2">
           <Label htmlFor="siteId">Site <span className="text-red-500">*</span></Label>
           <Select value={form.siteId} onValueChange={(v) => handleChange('siteId', v)}>
