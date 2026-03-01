@@ -5,12 +5,13 @@ import { formatCurrency } from '@/lib/utils'
  * Dark top header for mobile-first role pages.
  * Props:
  *   title      – app/org name (default 'Construction')
+ *   subtitle   – optional site name shown below title (e.g. 'Site A')
  *   userName   – logged-in user's name
  *   wallet     – { remainingBalance } from fundsApi.getWalletSummary()
  *   onLogout   – callback
  *   right      – optional extra node rendered before logout (e.g. notification bell)
  */
-export function MobileHeader({ title = 'Construction', userName, wallet, onLogout, right }) {
+export function MobileHeader({ title = 'Construction', subtitle, userName, wallet, onLogout, right }) {
   return (
     <header className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between shrink-0">
       <div className="flex items-center gap-2">
@@ -19,6 +20,7 @@ export function MobileHeader({ title = 'Construction', userName, wallet, onLogou
         </div>
         <div>
           <p className="text-sm font-bold leading-tight">{title}</p>
+          {subtitle && <p className="text-[11px] text-amber-300 leading-tight">{subtitle}</p>}
           {userName && <p className="text-[11px] text-blue-300 leading-tight">{userName}</p>}
         </div>
       </div>

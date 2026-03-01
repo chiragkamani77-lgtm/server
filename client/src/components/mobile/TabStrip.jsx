@@ -10,11 +10,8 @@
 export function TabStrip({ tabs = [], activeTab, onChange }) {
   return (
     <div className="bg-white border-b border-gray-200 shrink-0">
-      {/* overflow-x-auto + scrollbar-none makes it horizontally scrollable without a visible scrollbar */}
-      <div
-        className="flex overflow-x-auto"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-      >
+      {/* scrollbar-hide makes it horizontally scrollable without a visible scrollbar on all browsers */}
+      <div className="flex overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id

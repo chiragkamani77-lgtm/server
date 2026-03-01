@@ -41,7 +41,7 @@ router.get('/', authenticate, async (req, res) => {
           totalGstAmount: bills.reduce((sum, b) => sum + (b.gstAmount || 0), 0),
           totalAmount: bills.reduce((sum, b) => sum + (b.totalAmount || 0), 0),
           pendingBills: bills.filter(b => b.status === 'pending').length,
-          approvedBills: bills.filter(b => b.status === 'approved').length,
+          creditedBills: bills.filter(b => b.status === 'credited').length,
           paidBills: bills.filter(b => b.status === 'paid').length,
         };
         return {

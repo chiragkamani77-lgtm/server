@@ -375,8 +375,8 @@ export function SiteDetailView({ site, onBack, canAdd = true }) {
                           onClick={canAdd ? () => openEdit('bills', bill) : undefined} />
                         {bill.status === 'pending' && (
                           <div className="px-4 pb-3 flex gap-2">
-                            <button onClick={() => { setApproveBill(bill); setBillAction('approve') }} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold">
-                              <CheckCircle className="h-3.5 w-3.5" /> Approve
+                            <button onClick={() => { setApproveBill(bill); setBillAction('credit') }} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold">
+                              <CheckCircle className="h-3.5 w-3.5" /> Credit
                             </button>
                             <button onClick={() => { setApproveBill(bill); setBillAction('reject') }} className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-50 text-red-500 text-xs font-semibold">
                               <XCircle className="h-3.5 w-3.5" /> Reject
@@ -456,11 +456,17 @@ export function SiteDetailView({ site, onBack, canAdd = true }) {
                 ? <EmptyFeed icon={Users} message="No members assigned to this site"
                     action={canAdd ? { label: '+ Add Member', onClick: () => openForm('members') } : undefined} />
                 : <div className="divide-y divide-gray-100 bg-white">
-                    {members.map(member => (
+                    {members.map(member => {
+                      const mid = member._id?.toString()
+                      const fullUser = allUsers.find(u => u._id?.toString() === mid)
+                      const walletBalance = fullUser?.walletBalance ?? member.walletBalance ?? 0
+                      return (
                       <div key={member._id} className="flex items-center pr-3">
                         <div className="flex-1 min-w-0">
                           <FeedItem seed={member.name} title={member.name}
                             subtitle={member.email || member.phone || '—'}
+                            amount={formatCurrency(walletBalance)}
+                            amountClass={walletBalance >= 0 ? 'text-green-600' : 'text-red-500'}
                             badge={{ label: ROLE_LABELS[member.role] || `Role ${member.role}`, className: ROLE_BADGE_CLS[member.role] || 'bg-gray-100 text-gray-600' }} />
                         </div>
                         {canAdd && (
@@ -470,7 +476,8 @@ export function SiteDetailView({ site, onBack, canAdd = true }) {
                           </button>
                         )}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
             )}
           </div>

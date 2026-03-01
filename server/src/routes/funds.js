@@ -72,7 +72,25 @@ async function validateFundAvailability(fundAllocationId, requestedAmount) {
 
     const totalLedger = ledgerAgg[0]?.totalLedger || 0;
 
-    const totalSpent = totalExpenses + totalLedger;
+    // Calculate total bills against this fund allocation (pending/credited/paid)
+    const billsAgg = await Bill.aggregate([
+      {
+        $match: {
+          fundAllocation: allocation._id,
+          status: { $in: ['pending', 'credited', 'paid'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalBills: { $sum: '$totalAmount' }
+        }
+      }
+    ]);
+
+    const totalBills = billsAgg[0]?.totalBills || 0;
+
+    const totalSpent = totalExpenses + totalLedger + totalBills;
     const balance = allocatedAmount - totalSpent;
     const available = requestedAmount <= balance;
 
@@ -205,10 +223,7 @@ router.get('/', authenticate, async (req, res) => {
       // Engineers/Supervisors see allocations to/from them
       filter.$or = [{ fromUser: req.user._id }, { toUser: req.user._id }];
     } else if (req.user.role === 3) {
-
-      console.log('Worker role filter');
-
-      // Workers see only allocations to them
+      // Supervisors see only allocations to them
       filter.toUser = req.user._id;
     }
 
@@ -800,13 +815,6 @@ router.get('/flow/detailed', authenticate, async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    // User-wise wallet balances
-    const userWallets = await Wallet.find({
-      organization: req.user.organization
-    })
-      .populate('user', 'name email role')
-      .sort({ balance: -1 });
-
     res.json({
       allocations,
       siteWise: siteWiseData.map(s => ({
@@ -820,10 +828,6 @@ router.get('/flow/detailed', authenticate, async (req, res) => {
         remaining: s.totalAllocated - (s.expenses?.totalExpenses || 0)
       })),
       gstBreakdown,
-      userWallets: userWallets.map(w => ({
-        user: w.user,
-        balance: w.balance
-      }))
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -901,23 +905,45 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
       }
     }
 
-    const allocation = new FundAllocation({
-      organization: req.user.organization,
-      fromUser: req.user._id,
-      toUser: toUserId,
-      site: siteId || null,
-      amount,
-      description,
-      referenceNumber,
-      status: 'disbursed' // Auto-disburse if from Developer
-    });
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      const allocation = new FundAllocation({
+        organization: req.user.organization,
+        fromUser: req.user._id,
+        toUser: toUserId,
+        site: siteId || null,
+        amount,
+        description,
+        referenceNumber,
+        status: 'disbursed',
+        disbursedDate: new Date()
+      });
 
-    await allocation.save();
-    await allocation.populate('fromUser', 'name email role');
-    await allocation.populate('toUser', 'name email role');
-    if (siteId) await allocation.populate('site', 'name');
+      await allocation.save({ session });
 
-    res.status(201).json(allocation);
+      // Credit receiver wallet on creation (auto-disbursed)
+      if (req.user.role === 1) {
+        // Developer: funds come from investment pool — only credit receiver
+        await creditWallet(toUserId, amount, session);
+      } else {
+        // Engineer/Supervisor: transfer from sender's wallet to receiver's wallet
+        await transferWallet(req.user._id, toUserId, amount, session);
+      }
+
+      await session.commitTransaction();
+
+      await allocation.populate('fromUser', 'name email role');
+      await allocation.populate('toUser', 'name email role');
+      if (siteId) await allocation.populate('site', 'name');
+
+      res.status(201).json(allocation);
+    } catch (txErr) {
+      await session.abortTransaction();
+      throw txErr;
+    } finally {
+      session.endSession();
+    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -461,6 +461,8 @@ export default function DeveloperHome() {
                     <div className="flex-1 min-w-0">
                       <FeedItem seed={u.name} title={u.name}
                         subtitle={u.email || u.phone || '—'}
+                        amount={formatCurrency(u.walletBalance ?? 0)}
+                        amountClass={(u.walletBalance ?? 0) >= 0 ? 'text-green-600' : 'text-red-500'}
                         badge={{ label: ROLE_LABELS[u.role] || `Role ${u.role}`, className: ROLE_BADGE_CLS[u.role] || 'bg-gray-100 text-gray-600' }} />
                     </div>
                     <div className="shrink-0 flex gap-0.5">
