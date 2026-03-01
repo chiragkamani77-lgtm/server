@@ -4,7 +4,7 @@ import { Expense, Site, FundAllocation } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import { validateFundAvailability } from './funds.js';
-import { debitWallet } from '../utils/walletHelper.js';
+import { debitWallet, creditWallet } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
@@ -72,12 +72,11 @@ const maskChildAmounts = (expense, currentUser) => {
 // Get expenses (filtered by visibility)
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { siteId, category, startDate, endDate, page = 1, limit = 20 } = req.query;
+    const { siteId, startDate, endDate, page = 1, limit = 20 } = req.query;
 
     const filter = await getVisibilityFilter(req.user, siteId);
 
     // Apply additional filters
-    if (category) filter.category = category;
     if (startDate || endDate) {
       filter.expenseDate = {};
       if (startDate) filter.expenseDate.$gte = new Date(startDate);
@@ -92,7 +91,6 @@ router.get('/', authenticate, async (req, res) => {
 
     const expenses = await Expense.find(filter)
       .populate('site', 'name')
-      .populate('category', 'name')
       .populate('user', 'name email')
       .populate('approvedBy', 'name')
       .populate('fundAllocation', 'amount purpose fromUser toUser')
@@ -136,35 +134,13 @@ router.get('/summary/:siteId', authenticate, async (req, res) => {
 
     const filter = await getVisibilityFilter(req.user, siteId);
 
-    // Aggregate by category
-    const categoryBreakdown = await Expense.aggregate([
+    // Total expenses aggregate
+    const totalAgg = await Expense.aggregate([
       { $match: filter },
-      {
-        $group: {
-          _id: '$category',
-          total: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $lookup: {
-          from: 'expensecategories',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'categoryInfo'
-        }
-      },
-      {
-        $project: {
-          category: { $arrayElemAt: ['$categoryInfo.name', 0] },
-          total: 1,
-          count: 1
-        }
-      }
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
     ]);
-
-    // Total expenses
-    const totalExpenses = categoryBreakdown.reduce((sum, cat) => sum + cat.total, 0);
+    const totalExpenses = totalAgg[0]?.total || 0;
+    const totalEntries = totalAgg[0]?.count || 0;
 
     // Monthly breakdown
     const monthlyBreakdown = await Expense.aggregate([
@@ -189,8 +165,7 @@ router.get('/summary/:siteId', authenticate, async (req, res) => {
         name: site.name
       },
       totalExpenses,
-      totalEntries: categoryBreakdown.reduce((sum, cat) => sum + cat.count, 0),
-      categoryBreakdown,
+      totalEntries,
       monthlyBreakdown
     });
   } catch (error) {
@@ -204,23 +179,41 @@ router.post('/', authenticate, async (req, res) => {
   session.startTransaction();
 
   try {
-    const { siteId, categoryId, amount, description, vendorName, expenseDate, fundAllocationId } = req.body;
+    const { siteId, amount, description, vendorName, expenseDate, fundAllocationId } = req.body;
 
     if (!req.user.organization) {
       await session.abortTransaction();
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
-    // Fund allocation is now required
-    if (!fundAllocationId) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        message: 'Fund allocation is required for all expenses. Please select a fund allocation.'
-      });
+    // Auto-detect site for non-admin users (they only have 1 site)
+    let resolvedSiteId = siteId;
+    if (!resolvedSiteId && req.user.role !== 1) {
+      const assignedSite = await Site.findOne({ assignedUsers: req.user._id }).session(session);
+      if (!assignedSite) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: 'No site assigned to your account.' });
+      }
+      resolvedSiteId = assignedSite._id;
+    }
+
+    // Auto-detect fund allocation from the logged-in user if not provided
+    let resolvedFundAllocationId = fundAllocationId;
+    if (!resolvedFundAllocationId) {
+      const autoAlloc = await FundAllocation.findOne({
+        toUser: req.user._id,
+        status: 'disbursed'
+      }).sort({ allocationDate: -1 }).session(session);
+
+      if (!autoAlloc) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: 'No disbursed fund allocation found for your account.' });
+      }
+      resolvedFundAllocationId = autoAlloc._id;
     }
 
     // Check site access
-    const site = await Site.findById(siteId).session(session);
+    const site = await Site.findById(resolvedSiteId).session(session);
     if (!site) {
       await session.abortTransaction();
       return res.status(404).json({ message: 'Site not found' });
@@ -232,7 +225,7 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     // Validate fund allocation exists and is disbursed
-    const fundAllocation = await FundAllocation.findById(fundAllocationId).session(session);
+    const fundAllocation = await FundAllocation.findById(resolvedFundAllocationId).session(session);
     if (!fundAllocation) {
       await session.abortTransaction();
       return res.status(404).json({ message: 'Fund allocation not found' });
@@ -246,7 +239,7 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     // Validate sufficient funds available (using wallet balance)
-    const fundCheck = await validateFundAvailability(fundAllocationId, amount);
+    const fundCheck = await validateFundAvailability(resolvedFundAllocationId, amount);
     if (!fundCheck.available) {
       await session.abortTransaction();
       return res.status(400).json({
@@ -256,20 +249,22 @@ router.post('/', authenticate, async (req, res) => {
       });
     }
 
-    // For developers (role 1): expense is auto-approved
-    // For supervisors/workers: expense goes to pending status
+    // Developer (role 1): auto-approved, wallet debited immediately
+    // Supervisor (role 3): stays pending but wallet is blocked/held immediately
+    // Engineer (role 2): stays pending, wallet not touched until developer approves
     const isDeveloper = req.user.role === 1;
+    const isSupervisor = req.user.role === 3;
+    const isWalletHeld = isDeveloper || isSupervisor; // Wallet debited on creation
 
     const expense = new Expense({
       organization: req.user.organization,
-      site: siteId,
-      category: categoryId,
+      site: resolvedSiteId,
       user: req.user._id,
-      fundAllocation: fundAllocationId,
-      amount: isDeveloper ? amount : 0, // Supervisor submits 0, developer fills actual amount
-      requestedAmount: amount, // Store the requested amount
-      approvedAmount: isDeveloper ? amount : null, // Auto-approve for developer
-      status: isDeveloper ? 'approved' : 'pending', // Developer expenses auto-approved
+      fundAllocation: resolvedFundAllocationId,
+      amount: isWalletHeld ? amount : 0, // Supervisor holds amount in pending state
+      requestedAmount: amount,
+      approvedAmount: isDeveloper ? amount : null,
+      status: isDeveloper ? 'approved' : 'pending',
       approvedBy: isDeveloper ? req.user._id : null,
       approvalDate: isDeveloper ? new Date() : null,
       description,
@@ -279,15 +274,15 @@ router.post('/', authenticate, async (req, res) => {
 
     await expense.save({ session });
 
-    // Debit wallet for tracking (validated against fund allocation above)
-    if (isDeveloper && amount > 0) {
+    // Debit wallet: immediately for developer (approved) and supervisor (pending hold)
+    if (isWalletHeld && amount > 0) {
       await debitWallet(req.user._id, amount, session, true); // allowNegative=true
     }
 
     await session.commitTransaction();
 
     await expense.populate('site', 'name');
-    await expense.populate('category', 'name');
+
     await expense.populate('user', 'name email');
     await expense.populate('fundAllocation');
 
@@ -305,7 +300,6 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const expense = await Expense.findById(req.params.id)
       .populate('site', 'name')
-      .populate('category', 'name')
       .populate('user', 'name email');
 
     if (!expense) {
@@ -363,7 +357,7 @@ router.put('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Only developers can edit others\' expenses' });
     }
 
-    const { categoryId, amount, description, vendorName, expenseDate, requestedAmount } = req.body;
+    const { amount, description, vendorName, expenseDate, requestedAmount } = req.body;
 
     // Non-developers can only edit description, vendorName, expenseDate, requestedAmount
     if (!isDeveloper) {
@@ -373,7 +367,6 @@ router.put('/:id', authenticate, async (req, res) => {
       if (requestedAmount !== undefined) expense.requestedAmount = requestedAmount;
     } else {
       // Developer can edit everything
-      if (categoryId) expense.category = categoryId;
       if (amount !== undefined) expense.amount = amount;
       if (description !== undefined) expense.description = description;
       if (vendorName !== undefined) expense.vendorName = vendorName;
@@ -383,7 +376,7 @@ router.put('/:id', authenticate, async (req, res) => {
 
     await expense.save();
     await expense.populate('site', 'name');
-    await expense.populate('category', 'name');
+
     await expense.populate('user', 'name email');
     await expense.populate('approvedBy', 'name');
 
@@ -420,6 +413,7 @@ router.put('/:id/approve', authenticate, async (req, res) => {
     }
 
     const previousStatus = expense.status;
+    const heldAmount = expense.amount; // Amount already held in wallet (>0 for supervisor, 0 for engineer)
     expense.status = status;
 
     if (status === 'approved' || status === 'paid') {
@@ -428,14 +422,31 @@ router.put('/:id/approve', authenticate, async (req, res) => {
         return res.status(400).json({ message: 'Approved amount is required' });
       }
       expense.approvedAmount = approvedAmount;
-      expense.amount = approvedAmount; // Set actual amount
+      expense.amount = approvedAmount;
       expense.approvedBy = req.user._id;
       expense.approvalDate = new Date();
 
-      // Debit wallet for tracking only if status is changing from pending to approved/paid
       if (previousStatus === 'pending' && approvedAmount > 0) {
-        await debitWallet(expense.user, approvedAmount, session, true); // allowNegative=true
+        if (heldAmount > 0) {
+          // Wallet was already held (supervisor case) — adjust for any difference
+          const diff = heldAmount - approvedAmount;
+          if (diff > 0) {
+            // Developer approved less → credit back the difference
+            await creditWallet(expense.user, diff, session);
+          } else if (diff < 0) {
+            // Developer approved more → debit the extra
+            await debitWallet(expense.user, -diff, session, true);
+          }
+        } else {
+          // Wallet not yet touched (engineer case) — debit now
+          await debitWallet(expense.user, approvedAmount, session, true);
+        }
       }
+    }
+
+    if (status === 'rejected' && heldAmount > 0) {
+      // Release the held amount back to supervisor's wallet
+      await creditWallet(expense.user, heldAmount, session);
     }
 
     if (status === 'paid') {
@@ -450,7 +461,7 @@ router.put('/:id/approve', authenticate, async (req, res) => {
     await session.commitTransaction();
 
     await expense.populate('site', 'name');
-    await expense.populate('category', 'name');
+
     await expense.populate('user', 'name email');
     await expense.populate('approvedBy', 'name');
 

@@ -41,7 +41,7 @@ const workerLedgerSchema = new mongoose.Schema({
   category: {
     type: String,
     enum: ['salary', 'advance', 'bonus', 'deduction', 'reimbursement', 'contract_payment', 'pending_salary', 'other'],
-    required: true
+    default: 'other'
   },
   description: {
     type: String,

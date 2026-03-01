@@ -33,11 +33,15 @@ async function validateFundAvailability(fundAllocationId, requestedAmount) {
     const allocatedAmount = allocation.amount;
 
     // Calculate total spent from this fund allocation
+    // Include pending expenses with amount > 0 (supervisor wallet holds)
     const expensesAgg = await Expense.aggregate([
       {
         $match: {
           fundAllocation: allocation._id,
-          status: { $in: ['approved', 'paid'] }
+          $or: [
+            { status: { $in: ['approved', 'paid'] } },
+            { status: 'pending', amount: { $gt: 0 } }
+          ]
         }
       },
       {
@@ -833,7 +837,7 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
       return res.status(400).json({ message: 'No organization assigned' });
     }
 
-    const { toUserId, siteId, amount, purpose, description, referenceNumber } = req.body;
+    const { toUserId, siteId, amount, description, referenceNumber } = req.body;
 
     // Verify recipient
     const toUser = await User.findById(toUserId);
@@ -903,7 +907,6 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
       toUser: toUserId,
       site: siteId || null,
       amount,
-      purpose,
       description,
       referenceNumber,
       status: 'disbursed' // Auto-disburse if from Developer

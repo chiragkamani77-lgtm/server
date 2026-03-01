@@ -51,7 +51,7 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose = () => {} }
   }
 
   const sidebarContent = (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 overflow-hidden">
       {/* Brand */}
       <div className="px-5 py-5 border-b border-white/10 shrink-0">
         <div className="flex items-center gap-2">
@@ -127,8 +127,8 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose = () => {} }
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={onClose} />
-      <aside className="fixed left-0 top-0 z-50 h-full w-56 bg-slate-900 shadow-2xl md:hidden transform transition-transform duration-300 ease-in-out translate-x-0">
-        <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">
+      <aside className="fixed left-0 top-0 z-50 h-full w-56 bg-slate-900 shadow-2xl md:hidden flex flex-col">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-white/10 shrink-0">
           <span className="font-bold text-white">Menu</span>
           <button
             onClick={onClose}
@@ -137,7 +137,9 @@ export function Sidebar({ isMobile = false, isOpen = false, onClose = () => {} }
             <X className="h-5 w-5" />
           </button>
         </div>
-        {sidebarContent}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {sidebarContent}
+        </div>
       </aside>
     </>
   )

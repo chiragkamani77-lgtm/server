@@ -307,12 +307,22 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
       }
     }
 
+    // Auto-detect fund allocation from the logged-in user if not provided
+    let resolvedFundAllocationId = fundAllocationId;
+    if (!resolvedFundAllocationId) {
+      const autoAlloc = await FundAllocation.findOne({
+        toUser: req.user._id,
+        status: 'disbursed'
+      }).sort({ allocationDate: -1 }).session(session);
+      if (autoAlloc) resolvedFundAllocationId = autoAlloc._id;
+    }
+
     const entry = new WorkerLedger({
       organization: req.user.organization,
       worker: workerId,
       site: siteId || null,
       createdBy: req.user._id,
-      fundAllocation: fundAllocationId || null,
+      fundAllocation: resolvedFundAllocationId || null,
       contract: contractId || null,
       type,
       amount,
@@ -336,7 +346,7 @@ router.post('/', authenticate, requireRole(1, 2, 3), async (req, res) => {
     await entry.populate('worker', 'name email role');
     if (siteId) await entry.populate('site', 'name');
     await entry.populate('createdBy', 'name');
-    if (fundAllocationId) await entry.populate('fundAllocation');
+    if (resolvedFundAllocationId) await entry.populate('fundAllocation');
     if (contractId) await entry.populate('contract', 'title contractNumber totalAmount totalPaid status');
 
     res.status(201).json(entry);
@@ -573,10 +583,25 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
     } = req.body;
 
     // Validate required fields
-    if (!workerId || !fundAllocationId) {
+    if (!workerId) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ message: 'Worker ID and Fund Allocation ID are required' });
+      return res.status(400).json({ message: 'Worker ID is required' });
+    }
+
+    // Auto-detect fund allocation from the logged-in user if not provided
+    let resolvedSalaryFundAllocationId = fundAllocationId;
+    if (!resolvedSalaryFundAllocationId) {
+      const autoAlloc = await FundAllocation.findOne({
+        toUser: req.user._id,
+        status: 'disbursed'
+      }).sort({ allocationDate: -1 }).session(session);
+      if (!autoAlloc) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ message: 'No disbursed fund allocation found for your account.' });
+      }
+      resolvedSalaryFundAllocationId = autoAlloc._id;
     }
 
     // Verify worker
@@ -598,7 +623,7 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
     }
 
     // Verify fund allocation
-    const fundAllocation = await FundAllocation.findById(fundAllocationId).session(session);
+    const fundAllocation = await FundAllocation.findById(resolvedSalaryFundAllocationId).session(session);
     if (!fundAllocation) {
       await session.abortTransaction();
       session.endSession();
@@ -663,7 +688,7 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
     const netPayable = totalPendingSalary - totalAdvances;
 
     // Validate sufficient funds
-    const fundCheck = await validateFundAvailability(fundAllocationId, Math.max(netPayable, 0));
+    const fundCheck = await validateFundAvailability(resolvedSalaryFundAllocationId, Math.max(netPayable, 0));
     if (!fundCheck.available && netPayable > 0) {
       await session.abortTransaction();
       session.endSession();
@@ -714,7 +739,7 @@ router.post('/pay-salary', authenticate, requireRole(1, 2, 3), async (req, res) 
         worker: workerId,
         site: siteId || null,
         createdBy: req.user._id,
-        fundAllocation: fundAllocationId,
+        fundAllocation: resolvedSalaryFundAllocationId,
         type: 'credit',
         category: 'salary',
         amount: netPayable,
