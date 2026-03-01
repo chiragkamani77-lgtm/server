@@ -4,7 +4,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import mongoose from 'mongoose';
 import { validateFundAvailability } from './funds.js';
-import { debitWallet } from '../utils/walletHelper.js';
+import { debitWallet, creditWallet } from '../utils/walletHelper.js';
 
 const router = express.Router();
 
@@ -19,11 +19,12 @@ router.get('/', authenticate, async (req, res) => {
 
     const filter = { organization: req.user.organization };
 
-    // Supervisors/Workers can only see bills for their assigned sites
-    // Engineers (role 2) see all bills in the org for approval
+    // Role hierarchy visibility:
+    // Developer (1): all org bills
+    // Engineer (2): all org bills (supervisor bills visible for review)
+    // Supervisor/Worker (3+): only their own bills
     if (req.user.role >= 3) {
-      const sites = await Site.find({ assignedUsers: req.user._id }).select('_id');
-      filter.site = { $in: sites.map(s => s._id) };
+      filter.createdBy = req.user._id;
     }
 
     if (siteId) filter.site = siteId;
@@ -329,11 +330,11 @@ router.put('/:id/approve', authenticate, async (req, res) => {
   session.startTransaction();
 
   try {
-    // Only developers can approve
-    if (req.user.role !== 1) {
+    // Only developers (role 1) and engineers (role 2) can approve bills
+    if (req.user.role > 2) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(403).json({ message: 'Only developers can approve bills' });
+      return res.status(403).json({ message: 'Only developers and engineers can approve bills' });
     }
 
     const bill = await Bill.findById(req.params.id).session(session);
@@ -400,8 +401,8 @@ router.put('/:id/approve', authenticate, async (req, res) => {
   }
 });
 
-// Update bill status (credit/pay)
-router.put('/:id/status', authenticate, requireRole(1), async (req, res) => {
+// Update bill status (credit/pay) — Developer and Engineer can credit, only Developer can pay
+router.put('/:id/status', authenticate, requireRole(1, 2), async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -642,25 +643,50 @@ router.get('/vendors/suggestions', authenticate, async (req, res) => {
   }
 });
 
-// Delete bill (Level 1 only)
-router.delete('/:id', authenticate, requireRole(1), async (req, res) => {
+// Delete bill — Developer can delete any bill; creators can delete their own pending bills
+router.delete('/:id', authenticate, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const bill = await Bill.findById(req.params.id);
+    const bill = await Bill.findById(req.params.id).session(session);
 
     if (!bill) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Bill not found' });
     }
 
     // Check organization access
     if (bill.organization.toString() !== req.user.organization?.toString()) {
+      await session.abortTransaction();
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    await bill.deleteOne();
+    // Non-developers can only delete their own bills; only pending allowed for non-developers
+    if (req.user.role !== 1) {
+      if (bill.createdBy.toString() !== req.user._id.toString()) {
+        await session.abortTransaction();
+        return res.status(403).json({ message: 'You can only delete your own bills' });
+      }
+      if (bill.status !== 'pending') {
+        await session.abortTransaction();
+        return res.status(400).json({ message: 'Only pending bills can be deleted' });
+      }
+    }
+
+    // Refund wallet if bill was already credited or paid (wallet was debited at that point)
+    if (['credited', 'paid'].includes(bill.status) && bill.totalAmount > 0) {
+      await creditWallet(bill.createdBy, bill.totalAmount, session);
+    }
+
+    await bill.deleteOne({ session });
+    await session.commitTransaction();
 
     res.json({ message: 'Bill deleted successfully' });
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 

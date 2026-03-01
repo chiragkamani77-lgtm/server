@@ -5,12 +5,13 @@ import { MobileLayout, FeedItem, EmptyFeed } from '@/components/mobile'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
 import { ExpenseActions } from '@/components/expenses/ExpenseActions'
 import { BillForm } from '@/components/bills/BillForm'
+import { BillActions } from '@/components/bills/BillActions'
 import {
   Receipt, FileText, CalendarDays, BookOpen, Wallet, Loader,
-  CheckCircle, XCircle,
+  CheckCircle, XCircle, Users, Trash2,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { expensesApi, billsApi, attendanceApi, ledgerApi, usersApi, fundsApi } from '@/lib/api'
+import { expensesApi, billsApi, attendanceApi, ledgerApi, usersApi, fundsApi, sitesApi } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,7 @@ const TABS = [
   { id: 'attendance', label: 'Attendance', icon: CalendarDays },
   { id: 'ledger',     label: 'Ledger',     icon: BookOpen },
   { id: 'funds',      label: 'Funds',      icon: Wallet },
+  { id: 'members',    label: 'Members',    icon: Users },
 ]
 
 const BILL_STATUS = {
@@ -118,6 +120,8 @@ export default function EngineerHome() {
   // Bills
   const [bills, setBills] = useState([])
   const [billsLoading, setBillsLoading] = useState(false)
+  const [approveBill, setApproveBill] = useState(null)
+  const [billAction, setBillAction] = useState('credit')
 
   // Funds
   const [funds, setFunds] = useState([])
@@ -127,11 +131,17 @@ export default function EngineerHome() {
   })
   const fundsAmountEntered = parseFloat(fundsForm.amount) > 0
 
+  // Members
+  const [siteName, setSiteName] = useState('')
+  const [members, setMembers] = useState([])
+  const [membersLoading, setMembersLoading] = useState(false)
+
   // ── Bootstrap ──
 
   useEffect(() => {
     usersApi.getChildren().then(r => setWorkers(r.data || [])).catch(() => {})
     fundsApi.getWalletSummary().then(r => setWallet(r.data)).catch(() => {})
+    sitesApi.getAll().then(r => { const s = r.data || []; if (s.length) setSiteName(s[0].name) }).catch(() => {})
   }, [])
 
   // ── Data loaders ──
@@ -186,13 +196,24 @@ export default function EngineerHome() {
     } finally { setFundsLoading(false) }
   }, [toast])
 
+  const loadMembers = useCallback(async () => {
+    setMembersLoading(true)
+    try {
+      const res = await usersApi.getChildren()
+      setMembers(res.data || [])
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load members', variant: 'destructive' })
+    } finally { setMembersLoading(false) }
+  }, [toast])
+
   useEffect(() => {
     if (activeTab === 'expenses')   loadExpenses()
     if (activeTab === 'bills')      loadBills()
     if (activeTab === 'attendance') loadAttendance()
     if (activeTab === 'ledger')     loadLedger()
     if (activeTab === 'funds')      loadFunds()
-  }, [activeTab, loadExpenses, loadBills, loadAttendance, loadLedger, loadFunds])
+    if (activeTab === 'members')    loadMembers()
+  }, [activeTab, loadExpenses, loadBills, loadAttendance, loadLedger, loadFunds, loadMembers])
 
   // ── Sheet helpers ──
 
@@ -267,12 +288,48 @@ export default function EngineerHome() {
     }
   }
 
+  // ── Delete handlers ──
+
+  const handleDeleteExpense = async (id) => {
+    if (!window.confirm('Delete this expense?')) return
+    try {
+      await expensesApi.delete(id)
+      toast({ title: 'Expense deleted' })
+      loadExpenses()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const handleDeleteAttendance = async (id) => {
+    if (!window.confirm('Delete this attendance record?')) return
+    try {
+      await attendanceApi.delete(id)
+      toast({ title: 'Attendance deleted' })
+      loadAttendance()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const handleDeleteLedger = async (id) => {
+    if (!window.confirm('Delete this payment record?')) return
+    try {
+      await ledgerApi.delete(id)
+      toast({ title: 'Record deleted' })
+      loadLedger()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
   const fabLabels = {
     expenses:   'Add Expense',
     bills:      'Add Bill',
     attendance: 'Mark Attendance',
     ledger:     'Pay Worker',
     funds:      'Allocate Fund',
+    members:    null,
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -281,6 +338,7 @@ export default function EngineerHome() {
     <>
       <MobileLayout
         title="Construction"
+        subtitle={siteName || undefined}
         userName={user?.name}
         wallet={wallet}
         onLogout={() => { logout(); navigate('/login') }}
@@ -288,7 +346,7 @@ export default function EngineerHome() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         fabLabel={fabLabels[activeTab]}
-        onFabClick={() => setSheetOpen(true)}
+        onFabClick={fabLabels[activeTab] ? () => setSheetOpen(true) : undefined}
       >
 
         {/* ── Expenses ── */}
@@ -313,9 +371,18 @@ export default function EngineerHome() {
                     ].filter(Boolean).join(' · ')}
                     meta={<StatusMeta status={exp.status} />}
                     amount={formatCurrency(exp.requestedAmount || exp.amount)}
+                    actions={exp.status === 'pending' && exp.user?._id === user?._id && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteExpense(exp._id) }}
+                        className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                        aria-label="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   />
-                  {/* Approve/reject actions for pending */}
-                  {exp.status === 'pending' && (
+                  {/* Approve/reject for pending supervisor expenses */}
+                  {exp.status === 'pending' && exp.user?._id !== user?._id && (
                     <div className="px-4 pb-3 flex gap-2">
                       <button
                         onClick={() => { setApproveExpense(exp); setApproveAction('approve') }}
@@ -349,17 +416,35 @@ export default function EngineerHome() {
           ) : (
             <div className="divide-y divide-gray-100 bg-white">
               {bills.map((bill) => (
-                <FeedItem
-                  key={bill._id}
-                  seed={bill.vendorName || 'B'}
-                  title={bill.vendorName || '—'}
-                  subtitle={[bill.invoiceNumber, formatDate(bill.billDate)].filter(Boolean).join(' · ')}
-                  amount={formatCurrency(bill.totalAmount)}
-                  badge={{
-                    label: bill.status,
-                    className: BILL_STATUS[bill.status] || 'bg-gray-100 text-gray-600',
-                  }}
-                />
+                <div key={bill._id}>
+                  <FeedItem
+                    seed={bill.vendorName || 'B'}
+                    title={bill.vendorName || '—'}
+                    subtitle={[bill.createdBy?.name, bill.invoiceNumber, formatDate(bill.billDate)].filter(Boolean).join(' · ')}
+                    amount={formatCurrency(bill.totalAmount)}
+                    badge={{ label: bill.status, className: BILL_STATUS[bill.status] || 'bg-gray-100 text-gray-600' }}
+                  />
+                  {bill.status === 'pending' && (
+                    <div className="px-4 pb-3 flex gap-2">
+                      <button onClick={() => { setApproveBill(bill); setBillAction('credit') }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold">
+                        <CheckCircle className="h-3.5 w-3.5" /> Credit
+                      </button>
+                      <button onClick={() => { setApproveBill(bill); setBillAction('reject') }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-50 text-red-500 text-xs font-semibold">
+                        <XCircle className="h-3.5 w-3.5" /> Reject
+                      </button>
+                    </div>
+                  )}
+                  {bill.status === 'credited' && (
+                    <div className="px-4 pb-3">
+                      <button onClick={() => { setApproveBill(bill); setBillAction('pay') }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-green-50 text-green-700 text-xs font-semibold">
+                        <CheckCircle className="h-3.5 w-3.5" /> Mark Paid
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           )
@@ -388,6 +473,15 @@ export default function EngineerHome() {
                       label: rec.status?.replace('_', ' '),
                       className: ATTENDANCE_BADGE[rec.status] || 'bg-gray-100 text-gray-600',
                     }}
+                    actions={
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteAttendance(rec._id) }}
+                        className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                        aria-label="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    }
                   />
                 )
               })}
@@ -419,6 +513,15 @@ export default function EngineerHome() {
                     ].filter(Boolean).join(' · ')}
                     amount={`${entry.type === 'credit' ? '+' : '−'}${formatCurrency(entry.amount)}`}
                     amountClass={entry.type === 'credit' ? 'text-green-600' : 'text-red-500'}
+                    actions={
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteLedger(entry._id) }}
+                        className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                        aria-label="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    }
                   />
                 )
               })}
@@ -450,6 +553,35 @@ export default function EngineerHome() {
                       label: fund.status,
                       className: fund.status === 'disbursed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700',
                     }}
+                  />
+                )
+              })}
+            </div>
+          )
+        )}
+
+        {/* ── Members ── */}
+        {activeTab === 'members' && (
+          membersLoading ? <TabLoader /> :
+          members.length === 0 ? (
+            <EmptyFeed icon={Users} message="No team members found" />
+          ) : (
+            <div className="divide-y divide-gray-100 bg-white">
+              {members.map((m) => {
+                const roleLabel = m.isParent ? 'Manager' : m.role === 2 ? 'Engineer' : m.role === 3 ? 'Supervisor' : m.role === 4 ? 'Worker' : `Role ${m.role}`
+                return (
+                  <FeedItem
+                    key={m._id}
+                    seed={m.name}
+                    title={m.name}
+                    subtitle={m.email}
+                    meta={
+                      <span className={`text-[10px] font-medium capitalize ${m.isParent ? 'text-blue-500' : 'text-gray-400'}`}>
+                        {m.isParent && '↑ '}{roleLabel}
+                      </span>
+                    }
+                    amount={!m.isParent ? formatCurrency(m.walletBalance ?? 0) : undefined}
+                    amountClass={!m.isParent ? ((m.walletBalance ?? 0) >= 0 ? 'text-green-600' : 'text-red-500') : ''}
                   />
                 )
               })}
@@ -612,6 +744,17 @@ export default function EngineerHome() {
           onClose={() => setApproveExpense(null)}
           onSuccess={() => { setApproveExpense(null); loadExpenses() }}
           action={approveAction}
+        />
+      )}
+
+      {/* Bill credit/reject/pay dialog */}
+      {approveBill && (
+        <BillActions
+          bill={approveBill}
+          isOpen={!!approveBill}
+          onClose={() => setApproveBill(null)}
+          onSuccess={() => { setApproveBill(null); loadBills() }}
+          action={billAction}
         />
       )}
     </>

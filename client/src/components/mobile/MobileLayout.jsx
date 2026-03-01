@@ -7,6 +7,7 @@ import { FAB } from './FAB'
  *
  * Props:
  *   title       – app title in header
+ *   subtitle    – optional site name shown below title
  *   userName    – user name shown below title
  *   wallet      – { remainingBalance } for wallet display
  *   onLogout    – logout callback
@@ -24,6 +25,7 @@ import { FAB } from './FAB'
  */
 export function MobileLayout({
   title,
+  subtitle,
   userName,
   wallet,
   onLogout,
@@ -37,9 +39,10 @@ export function MobileLayout({
   children,
 }) {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen max-w-full bg-gray-50 flex flex-col overflow-x-hidden">
       <MobileHeader
         title={title}
+        subtitle={subtitle}
         userName={userName}
         wallet={wallet}
         onLogout={onLogout}

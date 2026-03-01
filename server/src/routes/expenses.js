@@ -1,6 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import { Expense, Site, FundAllocation } from '../models/index.js';
+import { Expense, Site, FundAllocation, User } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 import { validateFundAvailability } from './funds.js';
@@ -19,12 +19,23 @@ const getVisibilityFilter = async (user, siteId) => {
   switch (user.role) {
     case 1: // Developer - sees all expenses
       break;
-    case 2: { // Engineer - sees own + all subordinates (supervisors + workers)
-      const childIds = await user.getChildIds({ roles: [3, 4], siteId });
-      filter.user = { $in: [user._id, ...childIds] };
+    case 2: { // Engineer - sees own + all supervisors & workers in same org (role hierarchy)
+      const subordinates = await User.find({
+        organization: user.organization,
+        role: { $in: [3, 4] }
+      }).select('_id');
+      filter.user = { $in: [user._id, ...subordinates.map(s => s._id)] };
       break;
     }
-    case 3: // Worker - sees only own expenses
+    case 3: { // Supervisor - sees own + all workers in same org
+      const workers = await User.find({
+        organization: user.organization,
+        role: 4
+      }).select('_id');
+      filter.user = { $in: [user._id, ...workers.map(w => w._id)] };
+      break;
+    }
+    default: // Worker - sees only own expenses
       filter.user = user._id;
       break;
   }
@@ -371,10 +382,10 @@ router.put('/:id/approve', authenticate, async (req, res) => {
   session.startTransaction();
 
   try {
-    // Only developers can approve
-    if (req.user.role !== 1) {
+    // Only developers (role 1) and engineers (role 2) can approve
+    if (req.user.role > 2) {
       await session.abortTransaction();
-      return res.status(403).json({ message: 'Only developers can approve expenses' });
+      return res.status(403).json({ message: 'Only developers and engineers can approve expenses' });
     }
 
     const expense = await Expense.findById(req.params.id).session(session);
@@ -382,6 +393,15 @@ router.put('/:id/approve', authenticate, async (req, res) => {
     if (!expense) {
       await session.abortTransaction();
       return res.status(404).json({ message: 'Expense not found' });
+    }
+
+    // Engineers (role 2) can only approve supervisor (role 3) expenses
+    if (req.user.role === 2) {
+      const expenseOwner = await User.findById(expense.user).select('role').session(session);
+      if (!expenseOwner || expenseOwner.role !== 3) {
+        await session.abortTransaction();
+        return res.status(403).json({ message: 'Engineers can only approve supervisor expenses' });
+      }
     }
 
     const { status, approvedAmount, approvalNotes, paymentMethod, paymentReference } = req.body;
@@ -455,10 +475,13 @@ router.put('/:id/approve', authenticate, async (req, res) => {
 
 // Delete expense
 router.delete('/:id', authenticate, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const expense = await Expense.findById(req.params.id);
+    const expense = await Expense.findById(req.params.id).session(session);
 
     if (!expense) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Expense not found' });
     }
 
@@ -469,18 +492,29 @@ router.delete('/:id', authenticate, async (req, res) => {
     // Non-developers can only delete their own pending expenses
     if (!isDeveloper) {
       if (!isOwner) {
+        await session.abortTransaction();
         return res.status(403).json({ message: 'Only developers can delete others\' expenses' });
       }
       if (expense.status !== 'pending') {
+        await session.abortTransaction();
         return res.status(403).json({ message: 'Can only delete pending expenses' });
       }
     }
 
-    await expense.deleteOne();
+    // Release held wallet amount if expense was pending with a held amount (supervisor case)
+    if (expense.status === 'pending' && expense.amount > 0) {
+      await creditWallet(expense.user, expense.amount, session);
+    }
+
+    await expense.deleteOne({ session });
+    await session.commitTransaction();
 
     res.json({ message: 'Expense deleted successfully' });
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -514,19 +548,23 @@ router.post('/:id/receipt', authenticate, upload.single('receipt'), async (req, 
 
 // Bulk delete expenses
 router.post('/bulk-delete', authenticate, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const { ids } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      await session.abortTransaction();
       return res.status(400).json({ message: 'IDs array is required and cannot be empty' });
     }
 
     const isDeveloper = req.user.role === 1;
 
     // Verify all expenses belong to the user's organization and check permissions
-    const expenses = await Expense.find({ _id: { $in: ids }, organization: req.user.organization });
+    const expenses = await Expense.find({ _id: { $in: ids }, organization: req.user.organization }).session(session);
 
     if (expenses.length !== ids.length) {
+      await session.abortTransaction();
       return res.status(403).json({ message: 'Some expenses do not belong to your organization' });
     }
 
@@ -537,14 +575,22 @@ router.post('/bulk-delete', authenticate, async (req, res) => {
       );
 
       if (invalidExpenses.length > 0) {
+        await session.abortTransaction();
         return res.status(403).json({
           message: 'You can only delete your own pending expenses'
         });
       }
     }
 
-    // Delete the expenses
-    await Expense.deleteMany({ _id: { $in: ids } });
+    // Refund held wallet amounts for pending supervisor expenses
+    for (const exp of expenses) {
+      if (exp.status === 'pending' && exp.amount > 0) {
+        await creditWallet(exp.user, exp.amount, session);
+      }
+    }
+
+    await Expense.deleteMany({ _id: { $in: ids } }).session(session);
+    await session.commitTransaction();
 
     res.json({
       success: true,
@@ -552,7 +598,10 @@ router.post('/bulk-delete', authenticate, async (req, res) => {
       deletedCount: ids.length
     });
   } catch (error) {
+    await session.abortTransaction();
     res.status(500).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 

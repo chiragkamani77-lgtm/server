@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { ExpenseForm } from '@/components/expenses/ExpenseForm'
 import { MobileLayout, FeedItem, EmptyFeed } from '@/components/mobile'
-import { Receipt, CalendarDays, BookOpen, Loader } from 'lucide-react'
+import { Receipt, FileText, CalendarDays, BookOpen, Loader, Users, Trash2 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { expensesApi, attendanceApi, ledgerApi, usersApi, fundsApi } from '@/lib/api'
+import { BillForm } from '@/components/bills/BillForm'
+import { expensesApi, billsApi, attendanceApi, ledgerApi, usersApi, fundsApi, sitesApi } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
@@ -19,9 +20,18 @@ import {
 
 const TABS = [
   { id: 'expenses',   label: 'Expenses',   icon: Receipt },
+  { id: 'bills',      label: 'Bills',      icon: FileText },
   { id: 'attendance', label: 'Attendance', icon: CalendarDays },
   { id: 'ledger',     label: 'Ledger',     icon: BookOpen },
+  { id: 'members',    label: 'Members',    icon: Users },
 ]
+
+const BILL_STATUS = {
+  pending:  'bg-amber-100 text-amber-700',
+  credited: 'bg-blue-100 text-blue-700',
+  paid:     'bg-green-100 text-green-700',
+  rejected: 'bg-red-100 text-red-700',
+}
 
 const EXPENSE_STATUS = {
   pending:  { label: 'Pending Approval', dot: 'bg-amber-400',  text: 'text-amber-600' },
@@ -79,6 +89,9 @@ export default function SupervisorExpense() {
   const [workers, setWorkers] = useState([])
   const [sheetOpen, setSheetOpen] = useState(false)
   const [wallet, setWallet] = useState(null)
+  const [siteName, setSiteName] = useState('')
+  const [members, setMembers] = useState([])
+  const [membersLoading, setMembersLoading] = useState(false)
 
   // Expenses
   const [expenses, setExpenses] = useState([])
@@ -90,6 +103,10 @@ export default function SupervisorExpense() {
   const [attendanceForm, setAttendanceForm] = useState({
     workerId: '', date: TODAY, status: 'present', hoursWorked: '8', notes: '',
   })
+
+  // Bills
+  const [bills, setBills] = useState([])
+  const [billsLoading, setBillsLoading] = useState(false)
 
   // Ledger
   const [ledger, setLedger] = useState([])
@@ -104,9 +121,30 @@ export default function SupervisorExpense() {
   useEffect(() => {
     usersApi.getChildren().then(r => setWorkers(r.data || [])).catch(() => {})
     fundsApi.getWalletSummary().then(r => setWallet(r.data)).catch(() => {})
+    sitesApi.getAll().then(r => { const s = r.data || []; if (s.length) setSiteName(s[0].name) }).catch(() => {})
   }, [])
 
+  const loadMembers = useCallback(async () => {
+    setMembersLoading(true)
+    try {
+      const res = await usersApi.getChildren()
+      setMembers(res.data || [])
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load members', variant: 'destructive' })
+    } finally { setMembersLoading(false) }
+  }, [toast])
+
   // ── Data loaders ──
+
+  const loadBills = useCallback(async () => {
+    setBillsLoading(true)
+    try {
+      const res = await billsApi.getAll({ limit: 30 })
+      setBills(res.data?.bills || [])
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load bills', variant: 'destructive' })
+    } finally { setBillsLoading(false) }
+  }, [toast])
 
   const loadExpenses = useCallback(async () => {
     setExpensesLoading(true)
@@ -140,9 +178,11 @@ export default function SupervisorExpense() {
 
   useEffect(() => {
     if (activeTab === 'expenses')   loadExpenses()
+    if (activeTab === 'bills')      loadBills()
     if (activeTab === 'attendance') loadAttendance()
     if (activeTab === 'ledger')     loadLedger()
-  }, [activeTab, loadExpenses, loadAttendance, loadLedger])
+    if (activeTab === 'members')    loadMembers()
+  }, [activeTab, loadExpenses, loadBills, loadAttendance, loadLedger, loadMembers])
 
   // ── Sheet helpers ──
 
@@ -201,15 +241,62 @@ export default function SupervisorExpense() {
     }
   }
 
+  // ── Delete handlers ──
+
+  const handleDeleteExpense = async (id) => {
+    if (!window.confirm('Delete this expense?')) return
+    try {
+      await expensesApi.delete(id)
+      toast({ title: 'Expense deleted' })
+      loadExpenses()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const handleDeleteAttendance = async (id) => {
+    if (!window.confirm('Delete this attendance record?')) return
+    try {
+      await attendanceApi.delete(id)
+      toast({ title: 'Attendance deleted' })
+      loadAttendance()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const handleDeleteBill = async (id) => {
+    if (!window.confirm('Delete this bill?')) return
+    try {
+      await billsApi.delete(id)
+      toast({ title: 'Bill deleted' })
+      loadBills()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const handleDeleteLedger = async (id) => {
+    if (!window.confirm('Delete this payment record?')) return
+    try {
+      await ledgerApi.delete(id)
+      toast({ title: 'Record deleted' })
+      loadLedger()
+    } catch (err) {
+      toast({ title: 'Error', description: err.response?.data?.message || 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
   // ── Labels ──
 
-  const fabLabels = { expenses: 'Add Expense', attendance: 'Mark Attendance', ledger: 'Pay Worker' }
+  const fabLabels = { expenses: 'Add Expense', bills: 'Add Bill', attendance: 'Mark Attendance', ledger: 'Pay Worker', members: null }
 
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
     <MobileLayout
       title="Construction"
+      subtitle={siteName || undefined}
       userName={user?.name}
       wallet={wallet}
       onLogout={() => { logout(); navigate('/login') }}
@@ -217,7 +304,7 @@ export default function SupervisorExpense() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       fabLabel={fabLabels[activeTab]}
-      onFabClick={() => setSheetOpen(true)}
+      onFabClick={fabLabels[activeTab] ? () => setSheetOpen(true) : undefined}
     >
 
       {/* ── Expenses tab ── */}
@@ -239,6 +326,52 @@ export default function SupervisorExpense() {
                 subtitle={[formatDate(exp.expenseDate), exp.vendorName].filter(Boolean).join(' · ')}
                 meta={<StatusMeta status={exp.status} />}
                 amount={formatCurrency(exp.requestedAmount || exp.amount)}
+                actions={exp.status === 'pending' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteExpense(exp._id) }}
+                    className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── Bills tab ── */}
+      {activeTab === 'bills' && (
+        billsLoading ? <TabLoader /> :
+        bills.length === 0 ? (
+          <EmptyFeed
+            icon={FileText}
+            message="No bills yet"
+            action={{ label: '+ Add bill', onClick: () => setSheetOpen(true) }}
+          />
+        ) : (
+          <div className="divide-y divide-gray-100 bg-white">
+            {bills.map((bill) => (
+              <FeedItem
+                key={bill._id}
+                seed={bill.vendorName || 'B'}
+                title={bill.vendorName || '—'}
+                subtitle={[bill.invoiceNumber, formatDate(bill.billDate)].filter(Boolean).join(' · ')}
+                amount={formatCurrency(bill.totalAmount)}
+                badge={{
+                  label: bill.status,
+                  className: BILL_STATUS[bill.status] || 'bg-gray-100 text-gray-600',
+                }}
+                actions={bill.status === 'pending' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteBill(bill._id) }}
+                    className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               />
             ))}
           </div>
@@ -268,6 +401,15 @@ export default function SupervisorExpense() {
                     label: rec.status?.replace('_', ' '),
                     className: ATTENDANCE_BADGE[rec.status] || 'bg-gray-100 text-gray-600',
                   }}
+                  actions={
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteAttendance(rec._id) }}
+                      className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                      aria-label="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  }
                 />
               )
             })}
@@ -299,6 +441,44 @@ export default function SupervisorExpense() {
                   ].filter(Boolean).join(' · ')}
                   amount={`${entry.type === 'credit' ? '+' : '−'}${formatCurrency(entry.amount)}`}
                   amountClass={entry.type === 'credit' ? 'text-green-600' : 'text-red-500'}
+                  actions={
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteLedger(entry._id) }}
+                      className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                      aria-label="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  }
+                />
+              )
+            })}
+          </div>
+        )
+      )}
+
+      {/* ── Members tab ── */}
+      {activeTab === 'members' && (
+        membersLoading ? <TabLoader /> :
+        members.length === 0 ? (
+          <EmptyFeed icon={Users} message="No workers in your team yet" />
+        ) : (
+          <div className="divide-y divide-gray-100 bg-white">
+            {members.map((m) => {
+              const roleLabel = m.isParent ? 'Manager' : m.role === 3 ? 'Supervisor' : m.role === 4 ? 'Worker' : `Role ${m.role}`
+              return (
+                <FeedItem
+                  key={m._id}
+                  seed={m.name}
+                  title={m.name}
+                  subtitle={m.email}
+                  meta={
+                    <span className={`text-[10px] font-medium capitalize ${m.isParent ? 'text-blue-500' : 'text-gray-400'}`}>
+                      {m.isParent && '↑ '}{roleLabel}
+                    </span>
+                  }
+                  amount={!m.isParent ? formatCurrency(m.walletBalance ?? 0) : undefined}
+                  amountClass={!m.isParent ? ((m.walletBalance ?? 0) >= 0 ? 'text-green-600' : 'text-red-500') : ''}
                 />
               )
             })}
@@ -316,6 +496,13 @@ export default function SupervisorExpense() {
 
             {activeTab === 'expenses' && (
               <ExpenseForm onSuccess={handleExpenseSuccess} onCancel={closeSheet} />
+            )}
+
+            {activeTab === 'bills' && (
+              <BillForm
+                onSuccess={() => { closeSheet(); toast({ title: 'Bill added!' }); loadBills() }}
+                onCancel={closeSheet}
+              />
             )}
 
             {activeTab === 'attendance' && (

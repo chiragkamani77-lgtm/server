@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { billsApi } from '@/lib/api'
+import { billsApi, fundsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,10 +41,10 @@ const PAYMENT_METHODS = [
  * - onSuccess: Success callback
  * - action: 'approve' | 'reject' | 'pay'
  */
-export function BillActions({ bill, isOpen, onClose, onSuccess, action = 'approve' }) {
+export function BillActions({ bill, isOpen, onClose, onSuccess, action = 'credit' }) {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({
-    status: action === 'reject' ? 'rejected' : action === 'pay' ? 'paid' : 'approved',
+    status: action === 'reject' ? 'rejected' : action === 'pay' ? 'paid' : 'credited',
     approvedAmount: bill?.totalAmount || '',
     approvalNotes: '',
     paymentMethod: '',
@@ -61,19 +61,6 @@ export function BillActions({ bill, isOpen, onClose, onSuccess, action = 'approv
 
   const validateForm = () => {
     const newErrors = {}
-
-    if (form.status === 'approved' || form.status === 'paid') {
-      if (!form.approvedAmount || parseFloat(form.approvedAmount) <= 0) {
-        newErrors.approvedAmount = 'Valid approved amount is required'
-      }
-    }
-
-    if (form.status === 'paid') {
-      if (!form.paymentMethod) {
-        newErrors.paymentMethod = 'Payment method is required'
-      }
-    }
-
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -85,26 +72,13 @@ export function BillActions({ bill, isOpen, onClose, onSuccess, action = 'approv
 
     setSubmitting(true)
     try {
-      const payload = {
-        status: form.status,
+      if (action === 'reject') {
+        // Reject: use /approve endpoint (no wallet impact)
+        await billsApi.approve(bill._id, { status: 'rejected', approvalNotes: form.approvalNotes })
+      } else {
+        // Credit or Pay: use /status endpoint which debits wallet correctly
+        await billsApi.updateStatus(bill._id, form.status)
       }
-
-      if (form.status === 'approved' || form.status === 'paid') {
-        payload.approvedAmount = parseFloat(form.approvedAmount)
-      }
-
-      if (form.approvalNotes) {
-        payload.approvalNotes = form.approvalNotes
-      }
-
-      if (form.status === 'paid') {
-        payload.paymentMethod = form.paymentMethod
-        if (form.paymentReference) {
-          payload.paymentReference = form.paymentReference
-        }
-      }
-
-      await billsApi.approve(bill._id, payload)
       onSuccess?.()
       onClose()
     } catch (error) {
@@ -117,23 +91,19 @@ export function BillActions({ bill, isOpen, onClose, onSuccess, action = 'approv
 
   const getTitle = () => {
     switch (action) {
-      case 'reject':
-        return 'Reject Bill'
-      case 'pay':
-        return 'Mark as Paid'
-      default:
-        return 'Approve Bill'
+      case 'reject': return 'Reject Bill'
+      case 'pay':    return 'Mark as Paid'
+      case 'credit': return 'Credit Bill'
+      default:       return 'Credit Bill'
     }
   }
 
   const getDescription = () => {
     switch (action) {
-      case 'reject':
-        return 'Are you sure you want to reject this bill?'
-      case 'pay':
-        return 'Enter payment details to mark this bill as paid.'
-      default:
-        return 'Review and approve this bill.'
+      case 'reject': return 'Are you sure you want to reject this bill?'
+      case 'pay':    return 'Confirm payment to mark this bill as paid.'
+      case 'credit': return 'Credit this bill — amount will be debited from wallet.'
+      default:       return 'Credit this bill — amount will be debited from wallet.'
     }
   }
 
@@ -170,27 +140,7 @@ export function BillActions({ bill, isOpen, onClose, onSuccess, action = 'approv
             </div>
           </div>
 
-          {/* Approved Amount (for approve/pay actions) */}
-          {(action === 'approve' || action === 'pay') && (
-            <div className="space-y-2">
-              <Label htmlFor="approvedAmount">
-                Approved Amount <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="approvedAmount"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="Enter approved amount"
-                value={form.approvedAmount}
-                onChange={(e) => handleChange('approvedAmount', e.target.value)}
-                className={errors.approvedAmount ? 'border-red-500' : ''}
-              />
-              {errors.approvedAmount && (
-                <p className="text-sm text-red-500">{errors.approvedAmount}</p>
-              )}
-            </div>
-          )}
+          {/* No approvedAmount field — amount is taken directly from the bill */}
 
           {/* Payment Method (for pay action) */}
           {action === 'pay' && (

@@ -9,6 +9,7 @@
  *   amount     – formatted string shown on the right (optional)
  *   amountClass – extra className for amount text (e.g. 'text-green-600')
  *   badge      – { label, className } pill on the right (optional, alternative to amount)
+ *   actions    – optional node rendered on the right (e.g. delete icon button)
  *   onClick    – makes the row tappable
  */
 
@@ -31,6 +32,7 @@ export function FeedItem({
   amount,
   amountClass = '',
   badge,
+  actions,
   onClick,
 }) {
   const initial = (seed || title || '?')[0].toUpperCase()
@@ -58,15 +60,18 @@ export function FeedItem({
       </div>
 
       {/* Right side */}
-      <div className="shrink-0 text-right">
-        {amount && (
-          <p className={`text-sm font-bold text-gray-900 ${amountClass}`}>{amount}</p>
-        )}
-        {badge && (
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${badge.className}`}>
-            {badge.label}
-          </span>
-        )}
+      <div className="shrink-0 text-right flex items-center gap-2">
+        <div>
+          {amount && (
+            <p className={`text-sm font-bold text-gray-900 ${amountClass}`}>{amount}</p>
+          )}
+          {badge && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${badge.className}`}>
+              {badge.label}
+            </span>
+          )}
+        </div>
+        {actions}
       </div>
     </div>
   )

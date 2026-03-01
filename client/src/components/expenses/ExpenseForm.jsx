@@ -74,7 +74,7 @@ export function ExpenseForm({ expense = null, siteId = null, hideSite = false, o
         description: form.description,
         vendorName: form.vendorName,
         expenseDate: form.expenseDate,
-        ...(isAdmin && form.siteId ? { siteId: form.siteId } : {}),
+        ...(form.siteId ? { siteId: form.siteId } : {}),
       }
       if (isEditing) {
         if (!isAdmin) { delete payload.siteId; delete payload.amount }
