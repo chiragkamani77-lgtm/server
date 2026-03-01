@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { ledgerApi, sitesApi, usersApi, fundsApi } from '@/lib/api'
+import { ledgerApi, sitesApi, usersApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -38,15 +38,7 @@ import {
   PageLayout, PageHeader, SummaryBanner, SearchFilterBar,
   ListItem, ActionBtn, PagePagination, EmptyState,
 } from '@/components/page'
-import { FundAllocationSelector } from '@/components/FundAllocationSelector'
-import { Plus, Wallet, TrendingDown, ArrowUpRight, ArrowDownLeft, Edit, Trash2 } from 'lucide-react'
-
-const CATEGORIES = [
-  { value: 'salary', label: 'Salary' },
-  { value: 'pending_salary', label: 'Pending Salary' },
-  { value: 'advance', label: 'Advance' },
-  { value: 'bonus', label: 'Bonus' },
-]
+import { Plus, Wallet, Edit, Trash2 } from 'lucide-react'
 
 const PAYMENT_MODES = [
   { value: 'cash', label: 'Cash' },
@@ -63,7 +55,6 @@ export default function WorkerLedger() {
   const [entries, setEntries] = useState([])
   const [sites, setSites] = useState([])
   const [workers, setWorkers] = useState([])
-  const [fundAllocations, setFundAllocations] = useState([])
   const [selectedWorkerPendingSalary, setSelectedWorkerPendingSalary] = useState(null)
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 })
   const [loading, setLoading] = useState(true)
@@ -77,7 +68,7 @@ export default function WorkerLedger() {
   const [bulkSummary, setBulkSummary] = useState(null)
 
   const [filters, setFilters] = useState({
-    workerId: '', siteId: '', type: '', category: '', startDate: '', endDate: '',
+    workerId: '', siteId: '', type: '', startDate: '', endDate: '',
   })
 
   const bulkSelect = useBulkSelect(
@@ -88,19 +79,19 @@ export default function WorkerLedger() {
   )
 
   const [form, setForm] = useState({
-    workerId: '', siteId: '', fundAllocationId: '',
-    type: 'credit', amount: '', category: 'salary',
+    workerId: '', siteId: '',
+    type: 'credit', amount: '',
     description: '', transactionDate: new Date().toISOString().split('T')[0],
     referenceNumber: '', paymentMode: 'cash',
   })
 
   const [paySalaryForm, setPaySalaryForm] = useState({
-    fundAllocationId: '', amount: '', deductAdvances: true,
+    amount: '', deductAdvances: true,
     partialPayment: false, paymentMode: 'cash', referenceNumber: '', notes: '',
   })
 
   const [bulkPayForm, setBulkPayForm] = useState({
-    fundAllocationId: '', paymentMode: 'cash', referenceNumber: '', notes: '',
+    paymentMode: 'cash', referenceNumber: '', notes: '',
   })
 
   useEffect(() => { fetchInitialData(); fetchOverallSummary() }, [])
@@ -115,14 +106,12 @@ export default function WorkerLedger() {
 
   const fetchInitialData = async () => {
     try {
-      const [sitesRes, workersRes, fundsRes] = await Promise.all([
+      const [sitesRes, workersRes] = await Promise.all([
         sitesApi.getAll(),
         usersApi.getChildren(),
-        fundsApi.getAll({ status: 'disbursed' }),
       ])
       setSites(sitesRes.data)
       setWorkers(workersRes.data)
-      setFundAllocations(fundsRes.data?.allocations || [])
     } catch (e) { console.error(e) }
   }
 
@@ -166,10 +155,8 @@ export default function WorkerLedger() {
       const ledgerData = {
         workerId: form.workerId,
         siteId: form.siteId || null,
-        fundAllocationId: form.fundAllocationId || null,
         type: form.type,
         amount: parseFloat(form.amount),
-        category: form.category,
         description: form.description,
         transactionDate: form.transactionDate,
         referenceNumber: form.referenceNumber,
@@ -199,10 +186,8 @@ export default function WorkerLedger() {
     setForm({
       workerId: entry.worker?._id || '',
       siteId: entry.site?._id || '',
-      fundAllocationId: entry.fundAllocation?._id || '',
       type: entry.type,
       amount: entry.amount.toString(),
-      category: entry.category,
       description: entry.description || '',
       transactionDate: entry.transactionDate.split('T')[0],
       referenceNumber: entry.referenceNumber || '',
@@ -225,7 +210,7 @@ export default function WorkerLedger() {
   }
 
   const resetForm = () => {
-    setForm({ workerId: '', siteId: '', fundAllocationId: '', type: 'credit', amount: '', category: 'salary', description: '', transactionDate: new Date().toISOString().split('T')[0], referenceNumber: '', paymentMode: 'cash' })
+    setForm({ workerId: '', siteId: '', type: 'credit', amount: '', description: '', transactionDate: new Date().toISOString().split('T')[0], referenceNumber: '', paymentMode: 'cash' })
     setEditingId(null)
   }
 
@@ -235,7 +220,6 @@ export default function WorkerLedger() {
     try {
       await ledgerApi.paySalary({
         workerId: filters.workerId,
-        fundAllocationId: paySalaryForm.fundAllocationId || null,
         amount: parseFloat(paySalaryForm.amount),
         deductAdvances: paySalaryForm.deductAdvances,
         paymentMode: paySalaryForm.paymentMode,
@@ -253,7 +237,7 @@ export default function WorkerLedger() {
   }
 
   const resetPaySalaryForm = () => {
-    setPaySalaryForm({ fundAllocationId: '', amount: '', deductAdvances: true, partialPayment: false, paymentMode: 'cash', referenceNumber: '', notes: '' })
+    setPaySalaryForm({ amount: '', deductAdvances: true, partialPayment: false, paymentMode: 'cash', referenceNumber: '', notes: '' })
   }
 
   const openPaySalaryDialog = () => {
@@ -301,7 +285,6 @@ export default function WorkerLedger() {
     try {
       const { data } = await ledgerApi.bulkPaySalary({
         workerIds: selectedWorkers,
-        fundAllocationId: bulkPayForm.fundAllocationId,
         paymentMode: bulkPayForm.paymentMode,
         referenceNumber: bulkPayForm.referenceNumber,
         notes: bulkPayForm.notes,
@@ -309,7 +292,7 @@ export default function WorkerLedger() {
       toast({ title: 'Bulk payment done', description: data.message })
       setIsBulkPayOpen(false)
       setSelectedWorkers([])
-      setBulkPayForm({ fundAllocationId: '', paymentMode: 'cash', referenceNumber: '', notes: '' })
+      setBulkPayForm({ paymentMode: 'cash', referenceNumber: '', notes: '' })
       fetchEntries()
     } catch (error) {
       toast({ title: 'Error', description: error.response?.data?.message || 'Failed', variant: 'destructive' })
@@ -399,17 +382,10 @@ export default function WorkerLedger() {
             <SelectItem value="debit">🔴 Debit</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={filters.category || 'all'} onValueChange={(v) => { setFilters(f => ({ ...f, category: v === 'all' ? '' : v })); setPagination(p => ({ ...p, page: 1 })) }}>
-          <SelectTrigger className="h-9 w-32 text-sm"><SelectValue placeholder="Category" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            {CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
         <Input type="date" className="h-9 text-sm w-36" value={filters.startDate}
           onChange={(e) => { setFilters(f => ({ ...f, startDate: e.target.value })); setPagination(p => ({ ...p, page: 1 })) }} />
-        {(filters.workerId || filters.type || filters.category || filters.startDate) && (
-          <Button variant="ghost" size="sm" onClick={() => setFilters({ workerId: '', siteId: '', type: '', category: '', startDate: '', endDate: '' })}>Clear</Button>
+        {(filters.workerId || filters.type || filters.startDate) && (
+          <Button variant="ghost" size="sm" onClick={() => setFilters({ workerId: '', siteId: '', type: '', startDate: '', endDate: '' })}>Clear</Button>
         )}
       </SearchFilterBar>
 
@@ -439,7 +415,7 @@ export default function WorkerLedger() {
                 subtitle={
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs text-gray-400">{formatDate(entry.transactionDate)}</span>
-                    <span className="text-xs text-gray-400">• {CATEGORIES.find(c => c.value === entry.category)?.label}</span>
+                    {entry.category && entry.category !== 'other' && <span className="text-xs text-gray-400">• {entry.category}</span>}
                     {entry.site?.name && <span className="text-xs text-gray-400">• {entry.site.name}</span>}
                     {entry.paymentMode && <span className="text-xs text-gray-400">• {PAYMENT_MODES.find(m => m.value === entry.paymentMode)?.label}</span>}
                     {entry.description && <span className="text-xs text-gray-400 truncate max-w-[100px]">• {entry.description}</span>}
@@ -483,95 +459,60 @@ export default function WorkerLedger() {
       <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
         <SheetContent title={editingId ? 'Edit Entry' : 'Add Ledger Entry'}>
           <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+            {/* Amount — shown first */}
             <div className="space-y-1">
-              <Label>Worker *</Label>
-              <Select value={form.workerId} onValueChange={(v) => {
-                const workerSites = sites.filter(s => s.assignedUsers?.some(uid => uid === v))
-                setForm({ ...form, workerId: v, siteId: workerSites[0]?._id || '' })
-              }} required>
-                <SelectTrigger><SelectValue placeholder="Select worker" /></SelectTrigger>
-                <SelectContent>
-                  {workers.map(w => <SelectItem key={w._id} value={w._id}>{w.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label>Amount (₹) *</Label>
+              <Input type="number" value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                placeholder="5000" required min="0" autoFocus />
             </div>
 
-            <div className="space-y-1">
-              <Label>Payment Type *</Label>
-              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v, type: 'credit' })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-gray-400">Payment going to the worker</p>
-            </div>
+            {parseFloat(form.amount) > 0 && (
+              <>
+                <div className="space-y-1">
+                  <Label>Worker *</Label>
+                  <Select value={form.workerId} onValueChange={(v) => {
+                    const workerSites = sites.filter(s => s.assignedUsers?.some(uid => uid === v))
+                    setForm({ ...form, workerId: v, siteId: workerSites[0]?._id || '' })
+                  }} required>
+                    <SelectTrigger><SelectValue placeholder="Select worker" /></SelectTrigger>
+                    <SelectContent>
+                      {workers.map(w => <SelectItem key={w._id} value={w._id}>{w.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Amount (₹) *</Label>
-                <Input type="number" value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  placeholder="5000" required min="0" />
-              </div>
-              <div className="space-y-1">
-                <Label>Date *</Label>
-                <Input type="date" value={form.transactionDate}
-                  onChange={(e) => setForm({ ...form, transactionDate: e.target.value })} required />
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Date *</Label>
+                    <Input type="date" value={form.transactionDate}
+                      onChange={(e) => setForm({ ...form, transactionDate: e.target.value })} required />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>How Paid</Label>
+                    <Select value={form.paymentMode} onValueChange={(v) => setForm({ ...form, paymentMode: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_MODES.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Site</Label>
-                <Select value={form.siteId || 'none'} onValueChange={(v) => setForm({ ...form, siteId: v === 'none' ? '' : v })}>
-                  <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific site</SelectItem>
-                    {sites.map(s => <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>How Paid</Label>
-                <Select value={form.paymentMode} onValueChange={(v) => setForm({ ...form, paymentMode: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_MODES.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+                <div className="space-y-1">
+                  <Label>Reference (UTR / Cheque No.)</Label>
+                  <Input value={form.referenceNumber} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} placeholder="Optional" />
+                </div>
 
-            {fundAllocations.length > 0 && (
-              <div className="space-y-1">
-                <Label>Fund Source (Optional)</Label>
-                <Select value={form.fundAllocationId || 'none'} onValueChange={(v) => setForm({ ...form, fundAllocationId: v === 'none' ? '' : v })}>
-                  <SelectTrigger><SelectValue placeholder="Link to fund" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No specific fund</SelectItem>
-                    {fundAllocations.map(a => (
-                      <SelectItem key={a._id} value={a._id}>
-                        {a.fromUser?.name} → {formatCurrency(a.amount)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="space-y-1">
+                  <Label>Note / Description</Label>
+                  <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    placeholder="Weekly salary payment..." rows={2} />
+                </div>
+              </>
             )}
 
-            <div className="space-y-1">
-              <Label>Reference (UTR / Cheque No.)</Label>
-              <Input value={form.referenceNumber} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} placeholder="Optional" />
-            </div>
-
-            <div className="space-y-1">
-              <Label>Note / Description</Label>
-              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="Weekly salary payment..." rows={2} />
-            </div>
-
-            <Button type="submit" className="w-full h-11 text-base bg-amber-600 hover:bg-amber-700">
+            <Button type="submit" disabled={!parseFloat(form.amount) || !form.workerId} className="w-full h-11 text-base bg-amber-600 hover:bg-amber-700">
               {editingId ? 'Update Entry' : 'Add Entry'}
             </Button>
           </form>
@@ -647,19 +588,6 @@ export default function WorkerLedger() {
                 </div>
               </div>
 
-              {fundAllocations.length > 0 && (
-                <div className="space-y-1">
-                  <Label>Fund Source (Optional)</Label>
-                  <Select value={paySalaryForm.fundAllocationId || 'none'} onValueChange={(v) => setPaySalaryForm({ ...paySalaryForm, fundAllocationId: v === 'none' ? '' : v })}>
-                    <SelectTrigger><SelectValue placeholder="Select fund" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No specific fund</SelectItem>
-                      {fundAllocations.map(a => <SelectItem key={a._id} value={a._id}>{a.fromUser?.name} → {formatCurrency(a.amount)}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
               <div className="space-y-1">
                 <Label>Notes</Label>
                 <Textarea value={paySalaryForm.notes} onChange={(e) => setPaySalaryForm({ ...paySalaryForm, notes: e.target.value })} placeholder="Salary payment for the month..." rows={2} />
@@ -674,7 +602,7 @@ export default function WorkerLedger() {
       </Dialog>
 
       {/* Bulk Pay Dialog */}
-      <Dialog open={isBulkPayOpen} onOpenChange={(open) => { setIsBulkPayOpen(open); if (!open) { setSelectedWorkers([]); setBulkPayForm({ fundAllocationId: '', paymentMode: 'cash', referenceNumber: '', notes: '' }) } }}>
+      <Dialog open={isBulkPayOpen} onOpenChange={(open) => { setIsBulkPayOpen(open); if (!open) { setSelectedWorkers([]); setBulkPayForm({ paymentMode: 'cash', referenceNumber: '', notes: '' }) } }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleBulkPaySalary}>
             <DialogHeader>
@@ -735,13 +663,6 @@ export default function WorkerLedger() {
 
               {selectedWorkers.length > 0 && (
                 <>
-                  <FundAllocationSelector
-                    value={bulkPayForm.fundAllocationId}
-                    onChange={(v) => setBulkPayForm({ ...bulkPayForm, fundAllocationId: v })}
-                    requestedAmount={getSelectedTotals().totalNetPayable}
-                    required={true}
-                    label="Fund Source *"
-                  />
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label>Payment Mode *</Label>

@@ -11,11 +11,6 @@ const expenseSchema = new mongoose.Schema({
     ref: 'Site',
     required: true
   },
-  category: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'ExpenseCategory',
-    required: true
-  },
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

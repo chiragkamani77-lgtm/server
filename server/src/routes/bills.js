@@ -157,9 +157,19 @@ router.post('/', authenticate, async (req, res) => {
 
     const totalAmount = parseFloat(baseAmount) + parseFloat(gstAmount || 0);
 
-    // Validate fund allocation if provided
-    if (fundAllocationId) {
-      const fundAllocation = await FundAllocation.findById(fundAllocationId);
+    // Auto-detect fund allocation from the logged-in user if not provided
+    let resolvedFundAllocationId = fundAllocationId;
+    if (!resolvedFundAllocationId) {
+      const autoAlloc = await FundAllocation.findOne({
+        toUser: req.user._id,
+        status: 'disbursed'
+      }).sort({ allocationDate: -1 });
+      if (autoAlloc) resolvedFundAllocationId = autoAlloc._id;
+    }
+
+    // Validate fund allocation if resolved
+    if (resolvedFundAllocationId) {
+      const fundAllocation = await FundAllocation.findById(resolvedFundAllocationId);
       if (!fundAllocation) {
         return res.status(404).json({ message: 'Fund allocation not found' });
       }
@@ -171,7 +181,7 @@ router.post('/', authenticate, async (req, res) => {
       }
 
       // Validate sufficient funds available
-      const fundCheck = await validateFundAvailability(fundAllocationId, totalAmount);
+      const fundCheck = await validateFundAvailability(resolvedFundAllocationId, totalAmount);
       if (!fundCheck.available) {
         return res.status(400).json({
           message: fundCheck.message,
@@ -196,7 +206,7 @@ router.post('/', authenticate, async (req, res) => {
       organization: req.user.organization,
       site: siteId || null,
       createdBy: req.user._id,
-      fundAllocation: fundAllocationId || null,
+      fundAllocation: resolvedFundAllocationId || null,
       linkedInvestment: linkedInvestment || null,
       vendorName,
       vendorGstNumber,

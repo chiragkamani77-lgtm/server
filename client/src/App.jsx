@@ -1,130 +1,68 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { Toaster } from '@/components/ui/toaster'
-import { Layout } from '@/components/layout/Layout'
 
-// Pages
+// Role-based home pages (Splitwise-style mobile UI)
 import Login from '@/pages/Login'
-import Dashboard from '@/pages/Dashboard'
-import Sites from '@/pages/Sites'
-import SiteDetail from '@/pages/SiteDetail'
-import Expenses from '@/pages/Expenses'
-import Users from '@/pages/Users'
-import Reports from '@/pages/Reports'
-import Categories from './pages/Categories'
-import Investments from '@/pages/Investments'
-import FundAllocations from '@/pages/FundAllocations'
-import Bills from '@/pages/Bills'
-import Attendance from '@/pages/Attendance'
-import WorkerLedger from '@/pages/WorkerLedger'
-import Organization from '@/pages/Organization'
+import DeveloperHome from '@/pages/DeveloperHome'
+import EngineerHome from '@/pages/EngineerHome'
+import SupervisorExpense from '@/pages/SupervisorExpense'
 
-// Protected route wrapper for role-based access
-function ProtectedRoute({ children, allowedRoles }) {
+// Loading spinner shared across role guards
+function Spinner() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
+    </div>
+  )
+}
+
+// Guard that redirects unauthenticated users to /login
+function RoleRoute({ element }) {
   const { user, loading } = useAuth()
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-      </div>
-    )
-  }
-
-  if (allowedRoles && !allowedRoles.includes(user?.role)) {
-    return <Navigate to="/" replace />
-  }
-
-  return children
+  if (loading) return <Spinner />
+  if (!user) return <Navigate to="/login" replace />
+  return element
 }
 
 function AppRoutes() {
+  const { user, loading } = useAuth()
+
+  if (loading) return <Spinner />
+
+  // Role-based routing — each role gets a dedicated mobile UI
+  if (user?.role === 1) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<RoleRoute element={<DeveloperHome />} />} />
+      </Routes>
+    )
+  }
+
+  if (user?.role === 2) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<RoleRoute element={<EngineerHome />} />} />
+      </Routes>
+    )
+  }
+
+  if (user?.role === 3) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<RoleRoute element={<SupervisorExpense />} />} />
+      </Routes>
+    )
+  }
+
+  // Unauthenticated / unknown role → login
   return (
     <Routes>
-      {/* Public routes */}
       <Route path="/login" element={<Login />} />
-
-      {/* Protected routes */}
-      <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/sites" element={<Sites />} />
-        <Route path="/sites/:id" element={<SiteDetail />} />
-        <Route path="/expenses" element={<Expenses />} />
-        <Route
-          path="/users"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2, 3]}>
-              <Users />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/reports"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
-              <Reports />
-            </ProtectedRoute>
-          }
-        />
-          <Route path="/categories"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
-              <Categories />
-            </ProtectedRoute>
-          }
-          />
-        <Route
-          path="/investments"
-          element={
-            <ProtectedRoute allowedRoles={[1]}>
-              <Investments />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/funds"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2, 3]}>
-              <FundAllocations />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/bills"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
-              <Bills />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/attendance"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2, 3]}>
-              <Attendance />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/ledger"
-          element={
-            <ProtectedRoute allowedRoles={[1, 2, 3, 4]}>
-              <WorkerLedger />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/organization"
-          element={
-            <ProtectedRoute allowedRoles={[1]}>
-              <Organization />
-            </ProtectedRoute>
-          }
-        />
-      </Route>
-
-      {/* Catch all */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )
 }

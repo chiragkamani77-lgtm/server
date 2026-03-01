@@ -38,14 +38,6 @@ import {
   ListItem, ActionBtn, PagePagination, EmptyState,
 } from '@/components/page'
 
-const PURPOSES = [
-  { value: 'site_expense', label: 'Site Expense' },
-  { value: 'labor_expense', label: 'Labor Expense' },
-  { value: 'material', label: 'Material' },
-  { value: 'equipment', label: 'Equipment' },
-  { value: 'other', label: 'Other' },
-]
-
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-800',
   approved: 'bg-blue-100 text-blue-800',
@@ -75,10 +67,11 @@ export default function FundAllocations() {
     toUserId: '',
     siteId: '',
     amount: '',
-    purpose: 'site_expense',
     description: '',
     referenceNumber: '',
   })
+
+  const amountEntered = parseFloat(form.amount) > 0
 
   useEffect(() => {
     if (user?._id) fetchData()
@@ -120,6 +113,14 @@ export default function FundAllocations() {
     }
   }
 
+  const handleToUserChange = (userId) => {
+    // Auto-detect site from selected user's assigned site
+    const autoSite = sites.find(s =>
+      s.assignedUsers?.some(uid => (uid?._id || uid)?.toString() === userId)
+    )
+    setForm(prev => ({ ...prev, toUserId: userId, siteId: autoSite?._id || '' }))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
@@ -127,12 +128,11 @@ export default function FundAllocations() {
         toUserId: form.toUserId,
         siteId: form.siteId || null,
         amount: parseFloat(form.amount),
-        purpose: form.purpose,
         description: form.description,
         referenceNumber: form.referenceNumber,
       }
       if (editingId) {
-        await fundsApi.update(editingId, payload)
+        await fundsApi.updateStatus(editingId, payload)
         toast({ title: 'Allocation updated' })
       } else {
         await fundsApi.create(payload)
@@ -151,11 +151,11 @@ export default function FundAllocations() {
       toast({ title: 'Cannot edit this allocation', variant: 'destructive' })
       return
     }
+    const autoSite = allocation.site?._id || ''
     setForm({
       toUserId: allocation.toUser?._id || '',
-      siteId: allocation.site?._id || '',
+      siteId: autoSite,
       amount: allocation.amount.toString(),
-      purpose: allocation.purpose,
       description: allocation.description || '',
       referenceNumber: allocation.referenceNumber || '',
     })
@@ -186,7 +186,7 @@ export default function FundAllocations() {
   }
 
   const resetForm = () => {
-    setForm({ toUserId: '', siteId: '', amount: '', purpose: 'site_expense', description: '', referenceNumber: '' })
+    setForm({ toUserId: '', siteId: '', amount: '', description: '', referenceNumber: '' })
     setEditingId(null)
   }
 
@@ -201,15 +201,6 @@ export default function FundAllocations() {
     if (isSupervisor) return allocation.status === 'pending'
     return false
   }
-
-  const getEditableFields = (status) => {
-    if (status === 'pending') return { toUser: true, site: true, amount: true, purpose: true }
-    if (status === 'approved') return { toUser: false, site: true, amount: false, purpose: false }
-    return { toUser: false, site: false, amount: false, purpose: false }
-  }
-
-  const currentEditStatus = editingId ? (allocations.find(a => a._id === editingId)?.status || '') : ''
-  const editableFields = getEditableFields(currentEditStatus)
 
   const summaryItems = walletSummary
     ? [
@@ -313,9 +304,6 @@ export default function FundAllocations() {
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs text-gray-400">{formatDate(allocation.allocationDate)}</span>
                     {allocation.site?.name && <span className="text-xs text-gray-400">• {allocation.site.name}</span>}
-                    <span className="text-xs text-gray-400">
-                      • {PURPOSES.find(p => p.value === allocation.purpose)?.label || allocation.purpose}
-                    </span>
                     {allocation.referenceNumber && (
                       <span className="text-xs text-gray-400">• Ref: {allocation.referenceNumber}</span>
                     )}
@@ -389,52 +377,7 @@ export default function FundAllocations() {
       <Sheet open={sheetOpen} onOpenChange={(open) => { setSheetOpen(open); if (!open) resetForm() }}>
         <SheetContent title={editingId ? 'Edit Allocation' : 'Allocate Funds'}>
           <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
-            {editingId && currentEditStatus === 'approved' && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
-                <strong>Limited Edit:</strong> Amount and recipient cannot be changed for an approved allocation.
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <Label>Send Money To *</Label>
-              <Select
-                value={form.toUserId}
-                onValueChange={(v) => setForm({ ...form, toUserId: v })}
-                required
-                disabled={!!editingId && !editableFields.toUser}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose team member" />
-                </SelectTrigger>
-                <SelectContent>
-                  {users.map((u) => (
-                    <SelectItem key={u._id} value={u._id}>
-                      {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : 'Supervisor'})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label>Site (Optional)</Label>
-              <Select
-                value={form.siteId || 'none'}
-                onValueChange={(v) => setForm({ ...form, siteId: v === 'none' ? '' : v })}
-                disabled={!!editingId && !editableFields.site}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select site" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific site</SelectItem>
-                  {sites.map((site) => (
-                    <SelectItem key={site._id} value={site._id}>{site.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
+            {/* Amount first */}
             <div className="space-y-1">
               <Label>Amount (₹) *</Label>
               <Input
@@ -444,46 +387,69 @@ export default function FundAllocations() {
                 placeholder="e.g. 50000"
                 required
                 min="0"
-                disabled={!!editingId && !editableFields.amount}
+                autoFocus
               />
             </div>
 
-            <div className="space-y-1">
-              <Label>Purpose</Label>
-              <Select
-                value={form.purpose}
-                onValueChange={(v) => setForm({ ...form, purpose: v })}
-                disabled={!!editingId && !editableFields.purpose}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PURPOSES.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Rest shown when amount is entered */}
+            {amountEntered && (
+              <>
+                <div className="space-y-1">
+                  <Label>Send Money To *</Label>
+                  <Select
+                    value={form.toUserId}
+                    onValueChange={handleToUserChange}
+                    required
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose team member" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users.map((u) => (
+                        <SelectItem key={u._id} value={u._id}>
+                          {u.name} ({u.role === 1 ? 'Developer' : u.role === 2 ? 'Engineer' : 'Supervisor'})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="space-y-1">
-              <Label>Description / Note</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="e.g. For cement and steel purchase"
-                rows={3}
-              />
-            </div>
+                {/* Site — auto-detected from selected user */}
+                {form.toUserId && (
+                  <div className="rounded-md bg-muted px-3 py-2 text-sm">
+                    <span className="text-muted-foreground">Site: </span>
+                    <span className="font-medium">
+                      {sites.find(s => s._id === form.siteId)?.name || 'No site assigned'}
+                    </span>
+                  </div>
+                )}
 
-            <div className="space-y-1">
-              <Label>Reference / Transaction No.</Label>
-              <Input
-                value={form.referenceNumber}
-                onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
-                placeholder="e.g. TXN123456"
-              />
-            </div>
+                <div className="space-y-1">
+                  <Label>Description / Note</Label>
+                  <Textarea
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    placeholder="e.g. For cement and steel purchase"
+                    rows={3}
+                  />
+                </div>
 
-            <Button type="submit" className="w-full h-11 text-base bg-blue-600 hover:bg-blue-700">
+                <div className="space-y-1">
+                  <Label>Reference / Transaction No.</Label>
+                  <Input
+                    value={form.referenceNumber}
+                    onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })}
+                    placeholder="e.g. TXN123456"
+                  />
+                </div>
+              </>
+            )}
+
+            <Button
+              type="submit"
+              className="w-full h-11 text-base bg-blue-600 hover:bg-blue-700"
+              disabled={!amountEntered || !form.toUserId}
+            >
               {editingId ? 'Save Changes' : 'Send Funds'}
             </Button>
           </form>
